@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CAA Wealth Implementation Tracker</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f2433'/%3E%3Cpath d='M14 20l7 24 6-16 5 16 7-24' fill='none' stroke='%23eba380' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='48' cy='20' r='4' fill='%23def5ff'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="favicon.png">
 <!-- Content Security Policy. The only remote origins are Microsoft sign-in,
      Graph, the MSAL library (pinned with SRI) and the brand font. -->
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://graph.microsoft.com https://login.microsoftonline.com https://coastaladvicegroup.sharepoint.com; frame-src 'self' https://login.microsoftonline.com; base-uri 'none'; form-action 'none'">
@@ -95,9 +96,11 @@ a{color:var(--s1)}
 /* ---- layout ---- */
 #app{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
 #sidebar{position:sticky;top:0;height:100vh;background:var(--side-img);color:var(--side-ink);display:flex;flex-direction:column;border-right:1px solid var(--side-rule)}
-.side-brand{padding:24px 22px 18px;border-bottom:1px solid var(--side-rule)}
-.side-brand img{height:34px;filter:var(--logo-filter);display:block}
-.side-pill{display:inline-block;margin-top:12px;padding:5px 11px;border-radius:10px;line-height:1.35;background:var(--side-active-bg);color:var(--side-active-ink);font-size:10.5px;font-weight:700;letter-spacing:.09em}
+.side-brand{padding:24px 18px 18px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;border-bottom:1px solid var(--side-rule)}
+.side-brand img{width:86%;max-width:184px;height:auto;filter:var(--logo-filter);display:block}
+/* Same pill as the Fee Hub: solid peach, navy text, both themes. */
+.side-pill{display:inline-block;max-width:100%;background:var(--peach);color:var(--navy);font-size:9px;font-weight:700;letter-spacing:.15em;line-height:1.5;
+  text-transform:uppercase;text-align:center;padding:5px 13px;border-radius:var(--r-pill);box-shadow:0 1px 4px rgba(0,0,0,.18)}
 .side-nav{padding:14px 12px;display:flex;flex-direction:column;gap:3px;flex:1}
 .nav-btn{display:flex;align-items:center;gap:11px;padding:10px 12px;border:0;background:transparent;color:var(--side-ink);border-radius:10px;cursor:pointer;text-align:left;font-weight:500}
 .nav-btn svg{width:18px;height:18px;flex:none;opacity:.85}
@@ -240,9 +243,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .check-list label:hover{background:var(--surface-2)}
 
 /* ---- upload ---- */
-.drop{border:2px dashed var(--line-strong);border-radius:var(--r-lg);padding:46px 20px;text-align:center;background:var(--surface);cursor:pointer;transition:border-color .15s,background .15s}
+.drop{display:block;border:2px dashed var(--line-strong);border-radius:var(--r-lg);padding:46px 20px;text-align:center;background:var(--surface);cursor:pointer;transition:border-color .15s,background .15s}
 .drop:hover,.drop.over{border-color:var(--s1);background:var(--info-bg)}
-.drop svg{width:40px;height:40px;opacity:.6}
+.drop svg{width:40px;height:40px;opacity:.6;display:block;margin:0 auto}
 .drop h3{margin:10px 0 4px;font-size:16px}
 .progress{height:8px;border-radius:var(--r-pill);background:var(--mute-bg);overflow:hidden;margin:12px 0 6px}
 .progress > div{height:100%;background:var(--s1);width:0;transition:width .2s}
@@ -271,7 +274,7 @@ details.sect .inner{padding:0 14px 14px}
 /* ---- sign-in ---- */
 .gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--side-img)}
 .gate-card{width:min(420px,100%);background:var(--surface);border-radius:22px;box-shadow:var(--shadow-lift);padding:36px 34px 30px;text-align:center}
-.gate-card img{height:40px;filter:brightness(0) saturate(100%) invert(13%) sepia(24%) saturate(1420%) hue-rotate(168deg) brightness(94%) contrast(96%)}
+.gate-card img{height:54px;filter:brightness(0) saturate(100%) invert(13%) sepia(24%) saturate(1420%) hue-rotate(168deg) brightness(94%) contrast(96%)}
 :root[data-theme="dark"] .gate-card img{filter:none}
 .gate-card h1{font-size:22px;margin:18px 0 6px;font-weight:600}
 .gate-card p{color:var(--ink-muted);margin:0 0 22px}
@@ -902,14 +905,17 @@ const adviserOf = t => dirIndex.get(nameKey(t.adviser)) || null;
 const adviserLabel = raw => { const a = dirIndex.get(nameKey(raw)); return a && a.name ? a.name : flipName(raw); };
 const regionOf = t => { const a = adviserOf(t); return a ? a.region : ""; };
 
+/* A person's sign-in name (UPN) isn't always the address typed into the
+   directory — coastaladvicegroup vs coastaladvisory, aliases. Match on every
+   address Microsoft holds for them. */
+const isMe = email => !!email && (state.user.emails || new Set([lc(state.user.email)])).has(lc(email).trim());
 function computeRole() {
-  const e = lc(state.user.email);
   const r = state.role = {};
-  r.adviser = state.advisers.find(a => a.email && lc(a.email) === e) || null;
-  r.support = state.support.find(s => s.email && lc(s.email) === e) || null;
-  r.manager = state.managers.find(m => m.email && lc(m.email) === e) || null;
+  r.adviser = state.advisers.find(a => isMe(a.email)) || null;
+  r.support = state.support.find(s => isMe(s.email)) || null;
+  r.manager = state.managers.find(m => isMe(m.email)) || null;
   r.noAdmins = state.admins.length === 0;
-  r.admin = LOCAL || r.noAdmins || state.admins.some(a => lc(a.email) === e);
+  r.admin = LOCAL || r.noAdmins || state.admins.some(a => isMe(a.email));
   r.hasMine = !!(r.adviser || r.support || r.manager);
   if (!r.hasMine) state.f.mine = false;
   if (r.hasMine && pref.get("mineInit", false) === false) { state.f.mine = true; pref.set("mineInit", true); }
@@ -1515,18 +1521,24 @@ async function savePerson(list, existing, fields, required) {
   const miss = required.filter(k => !fields[k]);
   if (miss.length) { toast("Please fill in " + miss.map(k => ({ Title: "the name", XplanName: "the Xplan name", Email: "the email" }[k] || k)).join(" and "), true); return; }
   if (fields.Email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fields.Email)) { toast("That email doesn't look right.", true); return; }
-  if (list === "admins" && !existing && !LOCAL && state.admins.length === 0 && lc(fields.Email) !== lc(state.user.email)) {
+  if (list === "admins" && !existing && !LOCAL && state.admins.length === 0 && !isMe(fields.Email)) {
     if (!await confirmDialog("Lock yourself out?", "You're adding the first admin and it isn't you. Once saved, only that person can reach Settings and Upload. Continue?", "Add anyway")) return;
   }
   try {
     if (existing) await db.update(list, existing.id, fields); else await db.create(list, fields);
-    closeModal(); await refresh(true); await recomputeRouting(); toast("Saved");
+    closeModal(); await refresh(true); await recomputeRouting();
+    if (!state.role.admin) { renderShell(); toast("Saved — you're no longer an admin on this list, so Settings has closed."); return; }
+    if (list === "admins") renderShell();
+    toast("Saved");
   } catch (e) { toast("Couldn't save: " + e.message, true); }
 }
 async function deletePerson(list, p) {
   if (list === "admins" && state.admins.length === 1 && !LOCAL) { toast("Keep at least one admin.", true); return; }
+  if (list === "admins" && !LOCAL && isMe(p.email) && !state.admins.some(a => a !== p && isMe(a.email))) {
+    if (!await confirmDialog("Remove your own admin access?", "Once you're removed you'll lose Upload and Settings straight away — another admin would have to add you back.", "Remove me", true)) return;
+  }
   if (!await confirmDialog("Delete " + (p.name || "this entry") + "?", "This removes them from the directory. Tasks are not affected.", "Delete", true)) return;
-  try { await db.remove(list, p.id); closeModal(); await refresh(true); await recomputeRouting(); toast("Deleted"); }
+  try { await db.remove(list, p.id); closeModal(); await refresh(true); await recomputeRouting(); if (list === "admins" || !state.role.admin) renderShell(); toast("Deleted"); }
   catch (e) { toast("Couldn't delete: " + e.message, true); }
 }
 /* Power Automate reads who to email straight off each adviser row, so the
@@ -1703,6 +1715,16 @@ async function boot() {
     const acc = app.getActiveAccount();
     if (!acc) { renderGate(); return; }
     state.user = { name: acc.name || "", email: acc.username || "" };
+    const emails = new Set([lc(acc.username)]);
+    const claims = acc.idTokenClaims || {};
+    [claims.email, claims.preferred_username, claims.upn].forEach(v => v && emails.add(lc(v)));
+    try {
+      const me = await graph("/me?$select=mail,userPrincipalName,otherMails,proxyAddresses");
+      [me.mail, me.userPrincipalName].concat(me.otherMails || []).forEach(v => v && emails.add(lc(v)));
+      (me.proxyAddresses || []).forEach(p => { const m = String(p).match(/^smtp:(.+)$/i); if (m) emails.add(lc(m[1])); });
+      if (me.mail) state.user.email = me.mail;
+    } catch (e) { console.warn("profile lookup", e); }
+    state.user.emails = emails;
     db = remote;
     await remote.init();
     await loadAll();
