@@ -1,0 +1,12 @@
+# ── Client data must never reach the repo ────────────────────────────────────
+# GitHub Pages serves every file in the branch, so anything committed here is
+# readable at a URL whether or not the repo itself is private.
+sample/
+*.csv
+*.xlsx
+*.xls
+
+# ── Internal notes and dev tooling ──────────────────────────────────────────
+SETUP.md
+CHANGELOG.md
+*.ps1

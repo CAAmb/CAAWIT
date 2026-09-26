@@ -1,0 +1,1718 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAA Wealth Implementation Tracker</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f2433'/%3E%3Cpath d='M14 20l7 24 6-16 5 16 7-24' fill='none' stroke='%23eba380' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='48' cy='20' r='4' fill='%23def5ff'/%3E%3C/svg%3E">
+<!-- Content Security Policy. The only remote origins are Microsoft sign-in,
+     Graph, the MSAL library (pinned with SRI) and the brand font. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://graph.microsoft.com https://login.microsoftonline.com https://coastaladvicegroup.sharepoint.com; frame-src 'self' https://login.microsoftonline.com; base-uri 'none'; form-action 'none'">
+<script>
+/* Clickjacking guard, matching the other Coastal apps. MSAL's silent-renewal
+   iframe loads this page to hand a token back, so leave that one framed. */
+(function () {
+  if (window.top === window.self) return;
+  if (/[?#].*\b(code|error|state|id_token|session_state)=/.test(location.href)) return;
+  document.documentElement.style.display = "none";
+  window.top.location = window.self.location;
+})();
+/* Theme before first paint, so dark users never see a white flash. */
+(function () {
+  var t = null; try { t = localStorage.getItem("wit.theme"); } catch (e) {}
+  if (!t) t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+@font-face{font-family:"Halyard Display";font-style:normal;font-weight:400;font-display:swap;src:local("Halyard Display Book"),local("HalyardDisplay-Book"),local("Halyard Display")}
+@font-face{font-family:"Halyard Display";font-style:normal;font-weight:500 700;font-display:swap;src:local("Halyard Display Regular"),local("HalyardDisplay-Regular"),local("Halyard Display")}
+
+:root{
+  color-scheme:light;
+  --navy:#0f2433; --navy-2:#16344a; --sky:#def5ff; --peach:#eba380;
+  --plane:#eef3f6; --plane-wash:linear-gradient(180deg,#eaf1f5 0%,#f4f7f8 46%,#f8f5f2 100%);
+  --surface:#ffffff; --surface-2:#f6f9fb;
+  --ink:#0f2433; --ink-2:#4a5b68; --ink-muted:#7b8b97;
+  --line:#e3e9ee; --line-strong:#cdd8e0;
+  --s1:#2a78d6; --focus-ring:rgba(42,120,214,.16);
+  --ok-bg:#e7f7e7;  --ok-fg:#0a7a0a;  --ok-line:#c4ebc4;
+  --warn-bg:#fff6e0; --warn-fg:#8a6100; --warn-line:#f3dfae;
+  --bad-bg:#fdeaea;  --bad-fg:#a52a2a;  --bad-line:#f2c9c9;
+  --info-bg:#e8f1fc; --info-fg:#1b5aa8; --info-line:#c9dcf5;
+  --teal-bg:#e2f5f6; --teal-fg:#0d6f78; --teal-line:#bfe6e9;
+  --mute-bg:#eef2f5; --mute-fg:#5a6b77;
+  --row-hover:#f2f8fc; --zebra:#fafcfd;
+  --scrim:rgba(15,36,51,.45);
+  --shadow:0 1px 2px rgba(15,36,51,.05),0 6px 20px rgba(15,36,51,.06);
+  --shadow-lift:0 18px 60px rgba(15,36,51,.24);
+  --side-img:linear-gradient(180deg,#b9d5e4 0%,#bdd7e6 18%,#c7ddeb 35%,#d5e3f2 49%,#e2eaf8 60%,#eff0fc 71%,#f5f3fb 78%,#f4ded8 83.6%,#edb9a0 87.3%,#e79e79 90.9%,#e6976e 100%);
+  --side-ink:#12303f; --side-ink-dim:rgba(18,48,63,.6); --side-rule:rgba(15,36,51,.12);
+  --side-hover:rgba(15,36,51,.07); --side-active-bg:var(--navy); --side-active-ink:#ffffff;
+  --side-foot-bg:rgba(255,255,255,.34);
+  --logo-filter:brightness(0) saturate(100%) invert(13%) sepia(24%) saturate(1420%) hue-rotate(168deg) brightness(94%) contrast(96%);
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-pill:999px;
+  --font:"Halyard Display","Figtree","Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --plane:#08161f; --plane-wash:linear-gradient(180deg,#071620 0%,#0a1e29 52%,#102630 100%);
+  --surface:#0f2733; --surface-2:#14303d;
+  --ink:#e6f0f6; --ink-2:#a8c1cf; --ink-muted:#7d97a6;
+  --line:#1c3846; --line-strong:#2a5064;
+  --s1:#63a9ef; --focus-ring:rgba(99,169,239,.22);
+  --ok-bg:#10352a;  --ok-fg:#66dc9b;  --ok-line:#1d5a43;
+  --warn-bg:#3a2f12; --warn-fg:#f2c869; --warn-line:#63501f;
+  --bad-bg:#3d1d1e;  --bad-fg:#f79490;  --bad-line:#6a3230;
+  --info-bg:#12304a; --info-fg:#8dc4f6; --info-line:#215079;
+  --teal-bg:#0f3538; --teal-fg:#6fd6de; --teal-line:#1c5559;
+  --mute-bg:#17323f; --mute-fg:#a8c1cf;
+  --row-hover:#173442; --zebra:#112b37;
+  --scrim:rgba(3,10,15,.62);
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 22px rgba(0,0,0,.28);
+  --shadow-lift:0 20px 64px rgba(0,0,0,.55);
+  --side-img:linear-gradient(180deg,#020614 0%,#030e1d 18%,#0c2433 36%,#1c3847 47%,#2a4857 55%,#3a5967 62%,#4c6a79 69%,#829eab 76%,#aac2cf 82%,#cadae1 87%,#ddbcaa 91%,#e59b74 94.5%,#e7976e 100%);
+  --side-ink:#ffffff; --side-ink-dim:rgba(226,240,247,.76); --side-rule:rgba(222,245,255,.14);
+  --side-hover:rgba(222,245,255,.12); --side-active-bg:var(--sky); --side-active-ink:var(--navy);
+  --side-foot-bg:rgba(4,12,18,.58);
+  --logo-filter:none;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:var(--font);color:var(--ink);background:var(--plane-wash) fixed,var(--plane);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--s1)}
+.hidden{display:none!important}
+.muted{color:var(--ink-muted)}
+.small{font-size:12px}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.nowrap{white-space:nowrap}
+
+/* ---- layout ---- */
+#app{display:grid;grid-template-columns:236px 1fr;min-height:100vh}
+#sidebar{position:sticky;top:0;height:100vh;background:var(--side-img);color:var(--side-ink);display:flex;flex-direction:column;border-right:1px solid var(--side-rule)}
+.side-brand{padding:24px 22px 18px;border-bottom:1px solid var(--side-rule)}
+.side-brand img{height:34px;filter:var(--logo-filter);display:block}
+.side-pill{display:inline-block;margin-top:12px;padding:5px 11px;border-radius:10px;line-height:1.35;background:var(--side-active-bg);color:var(--side-active-ink);font-size:10.5px;font-weight:700;letter-spacing:.09em}
+.side-nav{padding:14px 12px;display:flex;flex-direction:column;gap:3px;flex:1}
+.nav-btn{display:flex;align-items:center;gap:11px;padding:10px 12px;border:0;background:transparent;color:var(--side-ink);border-radius:10px;cursor:pointer;text-align:left;font-weight:500}
+.nav-btn svg{width:18px;height:18px;flex:none;opacity:.85}
+.nav-btn:hover{background:var(--side-hover)}
+.nav-btn.active{background:var(--side-active-bg);color:var(--side-active-ink)}
+.nav-btn .nav-count{margin-left:auto;font-size:11px;font-weight:700;padding:1px 8px;border-radius:var(--r-pill);background:var(--side-hover)}
+.nav-btn.active .nav-count{background:rgba(255,255,255,.18)}
+.side-foot{margin:12px;padding:12px;border-radius:var(--r-md);background:var(--side-foot-bg);display:flex;flex-direction:column;gap:8px}
+.side-user{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-role{font-size:11.5px;color:var(--side-ink-dim)}
+.side-actions{display:flex;gap:6px}
+.side-actions button{flex:1;border:1px solid var(--side-rule);background:transparent;color:var(--side-ink);border-radius:8px;padding:6px;cursor:pointer;font-size:12px}
+.side-actions button:hover{background:var(--side-hover)}
+#main{min-width:0;padding:26px 30px 60px}
+.banner{padding:10px 14px;border-radius:var(--r-md);margin-bottom:16px;font-size:13px;border:1px solid}
+.banner.warn{background:var(--warn-bg);color:var(--warn-fg);border-color:var(--warn-line)}
+.banner.info{background:var(--info-bg);color:var(--info-fg);border-color:var(--info-line)}
+.banner.bad{background:var(--bad-bg);color:var(--bad-fg);border-color:var(--bad-line)}
+
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap}
+.page-head h1{margin:0;font-size:26px;font-weight:600;letter-spacing:-.01em}
+.page-head .sub{color:var(--ink-muted);margin-top:3px;font-size:13px}
+
+/* ---- controls ---- */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--ink-muted)}
+.btn svg{width:15px;height:15px}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:#fff}
+:root[data-theme="dark"] .btn.primary{background:var(--sky);border-color:var(--sky);color:var(--navy)}
+.btn.primary:hover{filter:brightness(1.12)}
+.btn.danger{color:var(--bad-fg);border-color:var(--bad-line);background:var(--bad-bg)}
+.btn.ghost{border-color:transparent;background:transparent}
+.btn.ghost:hover{background:var(--surface-2)}
+.btn.sm{padding:5px 10px;font-size:12.5px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+input[type=text],input[type=email],input[type=number],input[type=search],select,textarea{background:var(--surface);border:1px solid var(--line-strong);border-radius:10px;padding:8px 11px;outline:none;min-width:0}
+input:focus,select:focus,textarea:focus{border-color:var(--s1);box-shadow:0 0 0 4px var(--focus-ring)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:var(--r-pill);border:1px solid var(--line-strong);background:var(--surface);cursor:pointer;font-size:13px;user-select:none;white-space:nowrap}
+.chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+:root[data-theme="dark"] .chip.on{background:var(--sky);border-color:var(--sky);color:var(--navy)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+.panel-pad{padding:18px 20px}
+.panel h3{margin:0 0 4px;font-size:15px;font-weight:600}
+
+/* ---- metric cards ---- */
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;box-shadow:var(--shadow);cursor:default;text-align:left}
+button.card{cursor:pointer}
+button.card:hover{border-color:var(--line-strong)}
+button.card.on{outline:2px solid var(--s1);outline-offset:-2px}
+.card .k{font-size:12px;color:var(--ink-muted);font-weight:500;display:flex;align-items:center;gap:8px}
+.card .v{font-size:28px;font-weight:600;margin-top:6px;letter-spacing:-.02em}
+.card .h{font-size:12px;color:var(--ink-muted);margin-top:2px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+
+/* ---- toolbar + tabs ---- */
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.toolbar .grow{flex:1 1 220px}
+.toolbar input[type=search]{width:100%}
+.tabs{display:flex;gap:4px;padding:4px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);margin-bottom:12px;overflow-x:auto}
+.tab{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:9px 12px;border:0;border-radius:12px;background:transparent;cursor:pointer;font-weight:500;white-space:nowrap;color:var(--ink-2)}
+.tab:hover{background:var(--surface-2)}
+.tab.active{background:var(--navy);color:#fff}
+:root[data-theme="dark"] .tab.active{background:var(--sky);color:var(--navy)}
+.tab .c{font-size:11.5px;font-weight:700;padding:1px 8px;border-radius:var(--r-pill);background:var(--mute-bg);color:var(--ink-2)}
+.tab.active .c{background:rgba(255,255,255,.2);color:inherit}
+
+/* ---- table ---- */
+.table-wrap{overflow-x:auto}
+table.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{text-align:left;font-weight:600;font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--ink-muted);padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface-2);position:sticky;top:0}
+.tbl th.sortable{cursor:pointer}
+.tbl th.sortable:hover{color:var(--ink)}
+.tbl th .arr{opacity:.7;margin-left:3px}
+.tbl td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl tbody tr:nth-child(even){background:var(--zebra)}
+.tbl tbody tr[data-id]{cursor:pointer}
+.tbl tbody tr[data-id]:hover{background:var(--row-hover)}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums}
+.cell-main{font-weight:600}
+.cell-sub{font-size:11.5px;color:var(--ink-muted);margin-top:1px}
+.client-cell{min-width:150px}
+.task-cell{max-width:280px;min-width:180px}
+.cmt-cell{max-width:340px;min-width:200px}
+.clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pager{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--ink-muted)}
+.pager .btns{display:flex;gap:6px}
+.empty{padding:48px 20px;text-align:center;color:var(--ink-muted)}
+
+.badge{display:inline-block;padding:3px 9px;border-radius:var(--r-pill);font-size:11.5px;font-weight:600;border:1px solid;white-space:nowrap}
+.st-unactioned{background:var(--bad-bg);color:var(--bad-fg);border-color:var(--bad-line)}
+.st-pending{background:var(--warn-bg);color:var(--warn-fg);border-color:var(--warn-line)}
+.st-actioned{background:var(--info-bg);color:var(--info-fg);border-color:var(--info-line)}
+.st-complete{background:var(--ok-bg);color:var(--ok-fg);border-color:var(--ok-line)}
+.st-aborted,.st-other{background:var(--mute-bg);color:var(--mute-fg);border-color:var(--line)}
+.tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:5px;background:var(--mute-bg);color:var(--mute-fg);margin-left:5px;vertical-align:1px}
+.tag.warn{background:var(--warn-bg);color:var(--warn-fg)}
+.tag.bad{background:var(--bad-bg);color:var(--bad-fg)}
+.days{font-weight:700;font-variant-numeric:tabular-nums}
+.days.amber{color:var(--warn-fg)}
+.days.red{color:var(--bad-fg)}
+.late{color:var(--bad-fg);font-weight:600}
+
+/* ---- drawer ---- */
+#drawer-backdrop{position:fixed;inset:0;background:var(--scrim);z-index:54;opacity:0;pointer-events:none;transition:opacity .18s}
+#drawer-backdrop.open{opacity:1;pointer-events:auto}
+#drawer{position:fixed;top:0;right:0;height:100vh;width:min(560px,100vw);background:var(--surface);z-index:55;box-shadow:var(--shadow-lift);transform:translateX(102%);transition:transform .22s ease;display:flex;flex-direction:column}
+#drawer.open{transform:none}
+.dr-head{padding:20px 22px 16px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:flex-start}
+.dr-head h2{margin:0;font-size:19px;font-weight:600}
+.dr-head .x{margin-left:auto}
+.dr-body{overflow-y:auto;padding:18px 22px 30px;flex:1}
+.dr-subject{font-size:14.5px;font-weight:500;margin:0 0 14px;white-space:pre-wrap}
+.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;margin-bottom:22px}
+.fields .fk{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-muted);font-weight:600}
+.fields .fv{margin-top:2px}
+.thread-h{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px;font-size:13px;font-weight:600}
+.cmt{border:1px solid var(--line);border-radius:var(--r-md);padding:11px 13px;margin-bottom:9px;background:var(--surface)}
+.cmt .when{font-size:11.5px;color:var(--ink-muted);margin-bottom:4px;display:flex;gap:8px;align-items:center}
+.cmt .txt{white-space:pre-wrap;word-break:break-word}
+.cmt.sys{background:var(--surface-2);border-style:dashed}
+.cmt.sys .txt{color:var(--ink-2);font-style:italic}
+.cmt.latest{border-color:var(--s1)}
+
+/* ---- modal ---- */
+.modal-back{position:fixed;inset:0;background:var(--scrim);z-index:60;display:flex;align-items:flex-start;justify-content:center;padding:6vh 16px;overflow-y:auto}
+.modal{background:var(--surface);border-radius:var(--r-lg);box-shadow:var(--shadow-lift);width:min(560px,100%);display:flex;flex-direction:column}
+.modal.wide{width:min(820px,100%)}
+.modal-h{padding:18px 22px 6px;font-size:17px;font-weight:600}
+.modal-b{padding:10px 22px 16px}
+.modal-f{padding:14px 22px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.modal-f .left{margin-right:auto}
+.form-row{display:flex;flex-direction:column;gap:5px;margin-bottom:13px}
+.form-row label{font-size:12.5px;font-weight:600;color:var(--ink-2)}
+.form-row .hint{font-size:12px;color:var(--ink-muted)}
+.form-row input,.form-row select{width:100%}
+.check-list{max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:10px;padding:6px}
+.check-list label{display:flex;gap:9px;align-items:center;padding:6px 8px;border-radius:7px;cursor:pointer;font-weight:400;color:var(--ink)}
+.check-list label:hover{background:var(--surface-2)}
+
+/* ---- upload ---- */
+.drop{border:2px dashed var(--line-strong);border-radius:var(--r-lg);padding:46px 20px;text-align:center;background:var(--surface);cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--s1);background:var(--info-bg)}
+.drop svg{width:40px;height:40px;opacity:.6}
+.drop h3{margin:10px 0 4px;font-size:16px}
+.progress{height:8px;border-radius:var(--r-pill);background:var(--mute-bg);overflow:hidden;margin:12px 0 6px}
+.progress > div{height:100%;background:var(--s1);width:0;transition:width .2s}
+.sum-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0 18px}
+.sum{border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px;background:var(--surface)}
+.sum .v{font-size:24px;font-weight:600}
+.sum .k{font-size:12px;color:var(--ink-muted)}
+.sum.hl{border-color:var(--s1);background:var(--info-bg)}
+details.sect{border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:10px;background:var(--surface)}
+details.sect > summary{padding:12px 14px;cursor:pointer;font-weight:600;list-style:none;display:flex;gap:8px;align-items:center}
+details.sect > summary::-webkit-details-marker{display:none}
+details.sect > summary::before{content:"▸";color:var(--ink-muted);transition:transform .15s}
+details.sect[open] > summary::before{transform:rotate(90deg)}
+details.sect .inner{padding:0 14px 14px}
+.adv-row{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
+.adv-row:first-child{border-top:0}
+.adv-row .n{flex:1}
+
+/* ---- settings ---- */
+.subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.kv{display:grid;grid-template-columns:180px 1fr;gap:8px 14px;font-size:13px}
+.kv .k{color:var(--ink-muted)}
+.check-ok{color:var(--ok-fg);font-weight:600}
+.check-bad{color:var(--bad-fg);font-weight:600}
+
+/* ---- sign-in ---- */
+.gate{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--side-img)}
+.gate-card{width:min(420px,100%);background:var(--surface);border-radius:22px;box-shadow:var(--shadow-lift);padding:36px 34px 30px;text-align:center}
+.gate-card img{height:40px;filter:brightness(0) saturate(100%) invert(13%) sepia(24%) saturate(1420%) hue-rotate(168deg) brightness(94%) contrast(96%)}
+:root[data-theme="dark"] .gate-card img{filter:none}
+.gate-card h1{font-size:22px;margin:18px 0 6px;font-weight:600}
+.gate-card p{color:var(--ink-muted);margin:0 0 22px}
+.gate-card .btn{width:100%;justify-content:center;padding:12px}
+.gate-card .err{margin-top:16px;text-align:left}
+
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--navy);color:#fff;padding:11px 18px;border-radius:12px;box-shadow:var(--shadow-lift);opacity:0;pointer-events:none;transition:all .2s;z-index:80;font-size:13.5px;max-width:90vw}
+#toast.show{opacity:1;transform:translateX(-50%)}
+#toast.bad{background:#a52a2a}
+
+@media (max-width:1100px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:860px){
+  #app{grid-template-columns:1fr}
+  #sidebar{position:static;height:auto}
+  .side-nav{flex-direction:row;flex-wrap:wrap;flex:none;align-items:center}
+  .side-foot{display:none}
+  #main{padding:18px 14px 40px}
+  .fields{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="drawer-backdrop"></div>
+<aside id="drawer" aria-hidden="true"></aside>
+<div id="modals"></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* =========================================================================
+   CAA Wealth Implementation Tracker
+
+   A weekly Xplan "Detailed Implementation Task Report" is dropped in by an
+   admin, compared against SharePoint, previewed, and only the differences are
+   written. Everyone signed in can read. Emails (weekly digest + overdue
+   notices) are sent by Power Automate from the lists this app maintains —
+   see SETUP.md.
+   ========================================================================= */
+
+/* ---------------- configuration ---------------- */
+const CONFIG = {
+  /* Shares the Fee Hub's Entra registration — only this app's redirect URI
+     was added to it. Swap in a dedicated client ID here if one is ever made. */
+  clientId: "366f7021-eae7-4f1b-b5cc-dfa133a57348",
+  tenantId: "c315932a-57bd-4717-a27e-dd4a7fb23342",
+  sitePath: "coastaladvicegroup.sharepoint.com:/sites/AdviceRequests"
+};
+const SCOPES = ["Sites.ReadWrite.All", "User.Read"];
+
+/* On localhost the app runs against an in-memory store unless ?live=1 is on
+   the URL, so testing never needs a redirect URI and never touches the lists.
+   GitHub Pages is never localhost, so this cannot switch on in production. */
+const IS_LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+const LOCAL = !CONFIG.clientId || (IS_LOCALHOST && !/[?&]live=1\b/.test(location.search));
+
+const STATUSES = ["Unactioned", "Pending", "Actioned", "Complete", "Aborted"];
+const CLOSED = ["complete", "aborted"];
+const REGIONS = ["North", "South"];
+const MANAGER_REGIONS = ["North", "South", "All"];
+const PAGE_SIZE = 50;
+
+/* Settings are ROWS in WITSettings (Title / Value / Description). */
+const KNOWN_SETTINGS = [
+  { key: "OverdueDays", def: 30, label: "Overdue after (days)",
+    desc: "An open task this many days past its activation date is overdue. The adviser, their support and their regional manager are emailed." },
+  { key: "ReminderDays", def: 7, label: "Repeat reminder every (days)",
+    desc: "While a task stays open and overdue, the email repeats this often. 0 sends it once only." }
+];
+
+/* List schemas. [name, type, indexed]. "note" = multi-line plain text. */
+const LISTS = {
+  tasks: { title: "WITTasks", cols: [
+    ["TaskKey", "text", true], ["EntityId", "text", true], ["ClientName", "text"], ["AdviserName", "text", true],
+    ["Assignee", "text"], ["AssigneeDisplay", "text"], ["TaskSubject", "note"], ["Status", "text", true], ["ActivatedDate", "date", true],
+    ["DueDate", "date"], ["CompleteDate", "date"], ["LatestComment", "note"], ["LatestCommentAt", "text"],
+    ["CommentCount", "number"], ["CommentSig", "text"], ["CommentsJson", "note"],
+    ["LastNotifiedAt", "datetime"], ["NotifyCount", "number"]] },
+  advisers: { title: "WITAdvisers", cols: [
+    ["XplanName", "text", true], ["Email", "text"], ["Region", "text"], ["IsActive", "bool"],
+    ["SupportEmails", "note"], ["ManagerEmails", "note"]] },
+  support:  { title: "WITSupport",  cols: [["Email", "text"], ["Advisers", "note"]] },
+  managers: { title: "WITManagers", cols: [["Email", "text"], ["Region", "text"]] },
+  admins:   { title: "WITAdmins",   cols: [["Email", "text"]] },
+  settings: { title: "WITSettings", cols: [["Value", "text"], ["Description", "text"]] },
+  imports:  { title: "WITImportLog", cols: [
+    ["FileName", "text"], ["ImportedBy", "text"], ["ImportedAt", "datetime"], ["ReportRows", "number"],
+    ["ReportTasks", "number"], ["NewTasks", "number"], ["StatusChanges", "number"], ["NewComments", "number"],
+    ["OtherUpdates", "number"], ["SummaryJson", "note"]] },
+  /* What each upload changed, so it can be reversed. Chunked across rows
+     because one multi-line column holds 63,999 characters. Read on demand only. */
+  undo:     { title: "WITImportUndo", cols: [["ImportId", "number", true], ["Seq", "number"], ["Json", "note"]] }
+};
+/* Everything but the thread is loaded up front; threads are fetched when a
+   task is opened or an import needs to merge one. */
+const TASK_SELECT = ["Title"].concat(LISTS.tasks.cols.map(c => c[0]).filter(n => n !== "CommentsJson"));
+
+/* ---------------- small helpers ---------------- */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pad = n => String(n).padStart(2, "0");
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const lc = s => String(s || "").toLowerCase();
+const num = v => { const n = Number(v); return isFinite(n) ? n : 0; };
+const plural = (n, w, p) => n + " " + (n === 1 ? w : (p || w + "s"));
+const fmtN = n => Number(n || 0).toLocaleString("en-AU");
+
+function cyrb53(str, seed = 0) {
+  let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/* SharePoint ids from one upload run mostly consecutive, so a first load of
+   3,000 tasks stores as a handful of [from, to] pairs. */
+function toRanges(ids) {
+  const s = ids.slice().sort((a, b) => a - b), out = [];
+  for (const n of s) { const last = out[out.length - 1]; if (last && n === last[1] + 1) last[1] = n; else out.push([n, n]); }
+  return out;
+}
+function fromRanges(r) { const out = []; (r || []).forEach(([a, b]) => { for (let n = a; n <= b; n++) out.push(n); }); return out; }
+const safeJson = s => { try { return JSON.parse(s || "{}") || {}; } catch (e) { return {}; } };
+
+const pref = {
+  get(k, d) { try { const v = localStorage.getItem("wit." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem("wit." + k, JSON.stringify(v)); } catch (e) {} }
+};
+
+/* ---- dates. Everything internal is ISO yyyy-mm-dd / yyyy-mm-ddThh:mm:ss local. ---- */
+function todayISO() { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+function parseAuDate(s) {
+  s = String(s || "").trim(); if (!s) return "";
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + "-" + pad(+m[2]) + "-" + pad(+m[1]);
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[1] + "-" + m[2] + "-" + m[3] : "";
+}
+function parseAuDateTime(s) {
+  s = String(s || "").trim(); if (!s) return "";
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([ap])?\.?m?\.?)?/i);
+  if (!m) { const d = parseAuDate(s); return d ? d + "T00:00:00" : ""; }
+  let h = +(m[4] || 0); const ap = lc(m[7]);
+  if (ap === "p" && h < 12) h += 12;
+  if (ap === "a" && h === 12) h = 0;
+  return m[3] + "-" + pad(+m[2]) + "-" + pad(+m[1]) + "T" + pad(h) + ":" + (m[5] || "00") + ":" + pad(+(m[6] || 0));
+}
+function diffDays(a, b) {
+  const [y1, m1, d1] = a.split("-").map(Number), [y2, m2, d2] = b.split("-").map(Number);
+  return Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 864e5);
+}
+function fmtDate(iso) { if (!iso) return ""; const [y, m, d] = iso.slice(0, 10).split("-"); return d + "/" + m + "/" + y; }
+function fmtDateTime(iso) {
+  if (!iso) return ""; const t = iso.slice(11, 16); if (!t || t === "00:00") return fmtDate(iso);
+  let [h, mi] = t.split(":").map(Number); const ap = h >= 12 ? "pm" : "am"; h = h % 12 || 12;
+  return fmtDate(iso) + " " + h + ":" + pad(mi) + " " + ap;
+}
+/* SharePoint date-only columns: written as yyyy-mm-ddT00:00:00Z through Graph
+   (Graph does no conversion). Anything else — a value typed in SharePoint, or
+   written by a flow — is read as a Sydney calendar date, which lands on the
+   right day for both midnight-UTC and midnight-local encodings. */
+const AU_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit" });
+function spDate(v) {
+  if (!v) return ""; const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/T00:00:00Z$/.test(s)) return s.slice(0, 10);
+  const d = new Date(s); return isNaN(d) ? "" : AU_DAY.format(d);
+}
+const toSpDate = iso => iso ? iso + "T00:00:00Z" : null;
+
+/* ---- names. Xplan gives "Surname, First"; "zz" prefixes mark inactive users. ---- */
+const stripZz = s => String(s || "").replace(/\bzz/gi, "").replace(/\s+/g, " ").trim();
+const isInactiveName = s => /(^|[\s,])zz/i.test(String(s || ""));
+function flipName(s) { s = stripZz(s); const i = s.indexOf(","); return i < 0 ? s : (s.slice(i + 1).trim() + " " + s.slice(0, i).trim()).trim(); }
+const nameKey = s => stripZz(s).toLowerCase().replace(/\s*,\s*/g, ", ");
+
+/* ---------------- UI primitives ---------------- */
+let toastTimer = null;
+function toast(msg, bad) {
+  const t = $("#toast"); t.textContent = msg; t.className = "show" + (bad ? " bad" : "");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = "", bad ? 6000 : 3200);
+}
+const modalStack = [];
+function openModal({ title, body, foot, wide, onMount }) {
+  const back = document.createElement("div");
+  back.className = "modal-back";
+  back.innerHTML = '<div class="modal' + (wide ? " wide" : "") + '" role="dialog" aria-modal="true">' +
+    '<div class="modal-h">' + esc(title) + '</div><div class="modal-b">' + body + '</div>' +
+    (foot ? '<div class="modal-f">' + foot + "</div>" : "") + "</div>";
+  back.addEventListener("mousedown", e => { if (e.target === back) closeModal(); });
+  $("#modals").appendChild(back); modalStack.push(back);
+  const first = back.querySelector("input,select,textarea"); if (first) setTimeout(() => first.focus(), 30);
+  if (onMount) onMount(back);
+  return back;
+}
+function closeModal() { const m = modalStack.pop(); if (m) m.remove(); }
+function confirmDialog(title, msg, okLabel = "Confirm", danger = false) {
+  return new Promise(resolve => {
+    const m = openModal({ title, body: '<p style="margin:0">' + msg + "</p>",
+      foot: '<button class="btn" data-a="no">Cancel</button><button class="btn ' + (danger ? "danger" : "primary") + '" data-a="yes">' + esc(okLabel) + "</button>" });
+    m.querySelector('[data-a="no"]').onclick = () => { closeModal(); resolve(false); };
+    m.querySelector('[data-a="yes"]').onclick = () => { closeModal(); resolve(true); };
+  });
+}
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (modalStack.length) closeModal(); else if ($("#drawer").classList.contains("open")) closeDrawer();
+});
+
+const ICON = {
+  tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>',
+  upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>',
+  refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11a8 8 0 10-2.3 5.7M20 5v6h-6"/></svg>',
+  download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a1 1 0 00-1 1v16a1 1 0 001 1h12a1 1 0 001-1V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>'
+};
+
+/* =========================================================================
+   Report parsing
+   ========================================================================= */
+const REPORT_COLS = {
+  entityId: "Entity Id", client: "Entity Name", adviser: "Adviser", assignee: "Task Assignee",
+  subject: "Task Subject", activated: "Task Activated Date", due: "Task Due Date",
+  complete: "Task Complete Date", status: "Task Status", commentAt: "Task Comment Modified At", comment: "Task Comment"
+};
+const normHeader = s => lc(s).replace(/[^a-z0-9]/g, "");
+
+async function readFileText(file) {
+  const buf = await file.arrayBuffer();
+  let t = new TextDecoder("utf-8").decode(buf);
+  if (t.includes("�")) t = new TextDecoder("windows-1252").decode(buf);
+  return t;
+}
+
+function parseCSV(text) {
+  text = text.replace(/\r\n?/g, "\n");
+  const rows = []; let row = [], field = "", q = false;
+  let i = text.charCodeAt(0) === 0xFEFF ? 1 : 0;
+  for (const n = text.length; i < n; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else q = false; }
+      else field += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.length > 1 || (r[0] || "").trim());
+}
+
+const SYS_COMMENT = /^(Completed|Aborted|Cancelled|Reassigned|Reactivated)\s*\(/i;
+const commentKey = c => c.at + "|" + cyrb53(c.text);
+function sortComments(list) {
+  /* newest first; on a tie the person's note beats Xplan's auto-note */
+  return list.sort((a, b) => a.at < b.at ? 1 : a.at > b.at ? -1 : (a.sys - b.sys));
+}
+const commentSig = list => cyrb53(list.map(commentKey).sort().join("\n"));
+
+/* Rows → tasks. Many rows are one task (one per comment). Xplan gives no task
+   id, so a task is client id + activation date + subject. Two genuinely
+   different tasks sharing all three are split by due date. */
+function buildReport(text) {
+  const rows = parseCSV(text);
+  if (!rows.length) throw new Error("The file is empty.");
+  const head = rows[0].map(normHeader);
+  const idx = {}; const missing = [];
+  for (const [k, label] of Object.entries(REPORT_COLS)) {
+    const i = head.indexOf(normHeader(label));
+    if (i < 0) missing.push(label); idx[k] = i;
+  }
+  if (missing.length) throw new Error("This doesn't look like the Detailed Implementation Task Report — missing column" +
+    (missing.length > 1 ? "s" : "") + ": " + missing.join(", ") + ".");
+
+  const stats = { rows: rows.length - 1, emptyComments: 0, dupComments: 0, skipped: 0, collisions: 0 };
+  const unknownStatuses = new Map();
+  const groups = new Map();
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]; const g = k => String(row[idx[k]] == null ? "" : row[idx[k]]).trim();
+    const entityId = g("entityId"), subject = g("subject").replace(/\s+/g, " ");
+    if (!entityId || !subject) { stats.skipped++; continue; }
+    const activated = parseAuDate(g("activated")), due = parseAuDate(g("due"));
+    const base = entityId + "|" + (activated || "none") + "|" + cyrb53(lc(subject));
+    let byDue = groups.get(base); if (!byDue) groups.set(base, byDue = new Map());
+    let t = byDue.get(due);
+    if (!t) {
+      const status = g("status");
+      if (status && !STATUSES.some(s => lc(s) === lc(status))) unknownStatuses.set(status, (unknownStatuses.get(status) || 0) + 1);
+      t = { base, entityId, client: g("client"), adviser: g("adviser"), assignee: g("assignee"), subject,
+            activated, due, complete: parseAuDate(g("complete")), status: canonStatus(status), comments: new Map() };
+      byDue.set(due, t);
+    }
+    const txt = g("comment");
+    if (!txt) { stats.emptyComments++; continue; }
+    const c = { at: parseAuDateTime(g("commentAt")) || "", text: txt, sys: SYS_COMMENT.test(txt) ? 1 : 0 };
+    const k = commentKey(c);
+    if (t.comments.has(k)) stats.dupComments++; else t.comments.set(k, c);
+  }
+  const tasks = [];
+  for (const byDue of groups.values()) {
+    const list = Array.from(byDue.values()).sort((a, b) => a.due < b.due ? -1 : 1);
+    if (list.length > 1) stats.collisions += list.length - 1;
+    list.forEach((t, i) => {
+      t.key = t.base + (i ? "#" + (i + 1) : "");
+      t.comments = sortComments(Array.from(t.comments.values()));
+      t.sig = commentSig(t.comments);
+      tasks.push(t);
+    });
+  }
+  return { tasks, stats, unknownStatuses };
+}
+function canonStatus(s) { const hit = STATUSES.find(x => lc(x) === lc(s)); return hit || String(s || "").trim(); }
+
+/* =========================================================================
+   Microsoft sign-in and Graph
+   ========================================================================= */
+const MSAL_SRC = "https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js";
+const MSAL_SRI = "sha384-B5PXeUfgiegchZiX5iMRssMrHd9NfPhFnITob1HyW1CY76udptWpBsniaDsH/+BY";
+let msalApp = null;
+
+function loadMsal() {
+  if (window.msal) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = MSAL_SRC; s.integrity = MSAL_SRI; s.crossOrigin = "anonymous"; s.referrerPolicy = "no-referrer";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Could not load the Microsoft sign-in library."));
+    document.head.appendChild(s);
+  });
+}
+const redirectUri = () => location.origin + location.pathname.replace(/index\.html$/i, "");
+async function ensureMsal() {
+  if (msalApp) return msalApp;
+  await loadMsal();
+  msalApp = new msal.PublicClientApplication({
+    auth: { clientId: CONFIG.clientId, authority: "https://login.microsoftonline.com/" + CONFIG.tenantId, redirectUri: redirectUri() },
+    cache: { cacheLocation: "localStorage", storeAuthStateInCookie: true },
+    system: { iframeHashTimeout: 10000, loadFrameTimeout: 10000 }
+  });
+  if (msalApp.initialize) await msalApp.initialize();
+  const res = await msalApp.handleRedirectPromise();
+  if (res && res.account) msalApp.setActiveAccount(res.account);
+  const accounts = msalApp.getAllAccounts();
+  if (accounts.length && !msalApp.getActiveAccount()) msalApp.setActiveAccount(accounts[0]);
+  return msalApp;
+}
+async function getToken(interactive = true) {
+  const app = await ensureMsal();
+  const account = app.getActiveAccount();
+  if (!account) {
+    if (!interactive) throw new Error("Not signed in.");
+    await app.loginRedirect({ scopes: SCOPES }); return "";
+  }
+  try { return (await app.acquireTokenSilent({ scopes: SCOPES, account })).accessToken; }
+  catch (e) { if (!interactive) throw e; await app.acquireTokenRedirect({ scopes: SCOPES }); return ""; }
+}
+function explainAuthError(e) {
+  const msg = String((e && e.message) || e || "");
+  if (/AADSTS9002326|cross-origin token redemption/i.test(msg))
+    return "The app registration lists this address as a <strong>Web</strong> redirect. It must be under <strong>Single-page application</strong> in Entra → Authentication.";
+  if (/AADSTS50011|redirect_uri|reply url/i.test(msg))
+    return "This address isn't a registered redirect URI yet. Add <code>" + esc(redirectUri()) + "</code> (exactly, trailing slash included) under Entra → the app → Authentication → Single-page application.";
+  if (/AADSTS65001|consent_required|AADSTS90008/i.test(msg))
+    return "Admin consent hasn't been granted for <code>Sites.ReadWrite.All</code> on the app registration.";
+  if (/AADSTS700016|unauthorized_client/i.test(msg))
+    return "The tenant doesn't recognise the client ID in <code>CONFIG.clientId</code>.";
+  if (/AADSTS50105|not assigned/i.test(msg))
+    return "Your account isn't assigned to the app registration. Ask IT to add you under Enterprise applications → Users and groups.";
+  return esc(msg);
+}
+async function graph(path, opts = {}) {
+  for (let attempt = 0; ; attempt++) {
+    const token = await getToken(opts.interactive !== false);
+    const res = await fetch(/^https:/.test(path) ? path : "https://graph.microsoft.com/v1.0" + path, {
+      method: opts.method || "GET",
+      headers: { Authorization: "Bearer " + token, "Content-Type": "application/json", ...(opts.headers || {}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    });
+    if ((res.status === 429 || res.status === 503) && attempt < 4) {
+      await sleep((+res.headers.get("Retry-After") || 3 * (attempt + 1)) * 1000); continue;
+    }
+    if (res.status === 204) return null;
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : null;
+    if (!res.ok) {
+      const err = new Error(res.status + " " + (data && data.error ? (data.error.message || data.error.code) : res.statusText));
+      err.status = res.status; throw err;
+    }
+    return data;
+  }
+}
+async function graphAll(path, opts) {
+  let out = [], next = path;
+  while (next) { const d = await graph(next, opts); out = out.concat(d.value || []); next = d["@odata.nextLink"]; }
+  return out;
+}
+/* $batch in chunks of 20, retrying throttled requests with their Retry-After. */
+async function graphBatch(reqs, onProgress) {
+  const results = new Array(reqs.length);
+  let pending = reqs.map((_, i) => i), round = 0, done = 0;
+  while (pending.length && round < 8) {
+    const retry = [];
+    for (let i = 0; i < pending.length; i += 20) {
+      const chunk = pending.slice(i, i + 20);
+      const body = { requests: chunk.map(ix => {
+        const r = reqs[ix]; const q = { id: String(ix), method: r.method, url: r.url };
+        if (r.body) { q.body = r.body; q.headers = { "Content-Type": "application/json" }; }
+        return q;
+      }) };
+      let res;
+      try { res = await graph("/$batch", { method: "POST", body }); }
+      catch (e) { chunk.forEach(ix => results[ix] = { status: e.status || 0, body: { error: { message: e.message } } }); done += chunk.length; if (onProgress) onProgress(done, reqs.length); continue; }
+      let wait = 0;
+      for (const r of res.responses || []) {
+        const ix = +r.id;
+        if (r.status === 429 || r.status === 503 || r.status === 504) {
+          retry.push(ix); wait = Math.max(wait, +((r.headers || {})["Retry-After"]) || 5);
+        } else { results[ix] = r; done++; }
+      }
+      if (onProgress) onProgress(done, reqs.length);
+      if (wait) await sleep(wait * 1000);
+    }
+    pending = retry; round++;
+  }
+  pending.forEach(ix => results[ix] = { status: 429, body: { error: { message: "Still throttled after several retries." } } });
+  return results;
+}
+
+/* =========================================================================
+   Data layer. Two stores with one shape: items are { id, fields }.
+   ========================================================================= */
+const normTitle = s => lc(s).replace(/[\s_-]/g, "");
+const sp = { siteId: null, siteName: "", lists: {}, missingLists: [] };
+
+const remote = {
+  async init() {
+    const site = await graph("/sites/" + CONFIG.sitePath + "?$select=id,displayName,webUrl");
+    sp.siteId = site.id; sp.siteName = site.displayName;
+    const lists = await graphAll("/sites/" + sp.siteId + "/lists?$select=id,name,displayName");
+    sp.missingLists = [];
+    for (const [k, def] of Object.entries(LISTS)) {
+      const hit = lists.find(l => normTitle(l.displayName) === normTitle(def.title)) || lists.find(l => normTitle(l.name) === normTitle(def.title));
+      sp.lists[k] = hit ? hit.id : null;
+      if (!hit) sp.missingLists.push(k);
+    }
+  },
+  path: k => "/sites/" + sp.siteId + "/lists/" + sp.lists[k],
+  async list(k) {
+    if (!sp.lists[k]) return [];
+    const sel = k === "tasks" ? "($select=" + TASK_SELECT.join(",") + ")" : "";
+    try { return await graphAll(this.path(k) + "/items?$expand=fields" + sel + "&$top=999"); }
+    catch (e) { if (sel && e.status === 400) return graphAll(this.path(k) + "/items?$expand=fields&$top=999"); throw e; }
+  },
+  async create(k, fields) { return graph(this.path(k) + "/items", { method: "POST", body: { fields } }); },
+  async update(k, id, fields) { return graph(this.path(k) + "/items/" + id + "/fields", { method: "PATCH", body: fields }); },
+  async remove(k, id) { return graph(this.path(k) + "/items/" + id, { method: "DELETE" }); },
+  async bulk(ops, onProgress) {
+    const reqs = ops.map(o => o.kind === "create"
+      ? { method: "POST", url: this.path(o.list) + "/items", body: { fields: o.fields } }
+      : o.kind === "delete" ? { method: "DELETE", url: this.path(o.list) + "/items/" + o.id }
+      : { method: "PATCH", url: this.path(o.list) + "/items/" + o.id + "/fields", body: o.fields });
+    const res = await graphBatch(reqs, onProgress);
+    return res.map(r => ({ ok: r && r.status >= 200 && r.status < 300, status: r ? r.status : 0, id: r && r.body && r.body.id,
+      error: r && r.body && r.body.error ? r.body.error.message : "" }));
+  },
+  async undoRows(importId) {
+    if (!sp.lists.undo) return [];
+    return graphAll(this.path("undo") + "/items?$expand=fields&$filter=fields/ImportId eq " + (+importId) + "&$top=999",
+      { headers: { Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly" } });
+  },
+  async comments(ids, onProgress) {
+    const reqs = ids.map(id => ({ method: "GET", url: this.path("tasks") + "/items/" + id + "?$expand=fields($select=CommentsJson)" }));
+    const res = await graphBatch(reqs, onProgress);
+    const out = new Map();
+    res.forEach((r, i) => { if (r && r.status === 200) out.set(String(ids[i]), parseThread(r.body.fields && r.body.fields.CommentsJson)); });
+    return out;
+  }
+};
+
+/* In-memory store for localhost testing. Nothing is persisted: a reload is a
+   clean slate, so no client data is ever left in a browser profile. */
+const local = {
+  mem: {}, nextId: 1,
+  async init() { for (const k of Object.keys(LISTS)) this.mem[k] = this.mem[k] || []; },
+  async list(k) { return this.mem[k].map(i => ({ id: i.id, fields: { ...i.fields } })); },
+  async create(k, fields) { const it = { id: String(this.nextId++), fields: { ...fields } }; this.mem[k].push(it); return { id: it.id, fields: { ...fields } }; },
+  async update(k, id, fields) { const it = this.mem[k].find(i => i.id === String(id)); if (!it) throw new Error("404 Item not found"); Object.assign(it.fields, fields); return it.fields; },
+  async remove(k, id) { this.mem[k] = this.mem[k].filter(i => i.id !== String(id)); },
+  async bulk(ops, onProgress) {
+    const out = [];
+    for (let i = 0; i < ops.length; i++) {
+      const o = ops[i];
+      try {
+        const r = o.kind === "create" ? await this.create(o.list, o.fields)
+          : o.kind === "delete" ? (this.mem[o.list].some(i => i.id === String(o.id)) ? await this.remove(o.list, o.id) : Promise.reject(Object.assign(new Error("404 Item not found"), { status: 404 })))
+          : await this.update(o.list, o.id, o.fields);
+        out.push({ ok: true, status: 200, id: r && r.id });
+      }
+      catch (e) { out.push({ ok: false, status: /^404/.test(e.message) ? 404 : 500, error: e.message }); }
+      if (onProgress && (i % 100 === 0 || i === ops.length - 1)) { onProgress(i + 1, ops.length); await sleep(0); }
+    }
+    return out;
+  },
+  async comments(ids) {
+    const out = new Map();
+    for (const id of ids) { const it = this.mem.tasks.find(i => i.id === String(id)); if (it) out.set(String(id), parseThread(it.fields.CommentsJson)); }
+    return out;
+  },
+  async undoRows(importId) { return this.mem.undo.filter(i => +i.fields.ImportId === +importId).map(i => ({ id: i.id, fields: { ...i.fields } })); }
+};
+let db = local;
+
+/* ---- thread <-> column. Compact: [[at, text, sys], ...] newest first. ---- */
+const THREAD_LIMIT = 60000;   // SharePoint multi-line text holds 63,999 characters
+function parseThread(json) {
+  if (!json) return [];
+  try { return JSON.parse(json).map(a => ({ at: a[0] || "", text: a[1] || "", sys: a[2] ? 1 : 0 })); } catch (e) { return []; }
+}
+function serialiseThread(list) {
+  let arr = list.map(c => c.sys ? [c.at, c.text, 1] : [c.at, c.text]);
+  let s = JSON.stringify(arr);
+  /* Longest thread seen so far is ~19k. If one ever outgrows the column, the
+     oldest notes are shortened — the newest are what anyone reads. */
+  for (let i = arr.length - 1; s.length > THREAD_LIMIT && i > 0; i--) {
+    arr[i] = [arr[i][0], arr[i][1].slice(0, 200) + (arr[i][1].length > 200 ? "…" : ""), arr[i][2]].filter(v => v !== undefined);
+    s = JSON.stringify(arr);
+  }
+  while (s.length > THREAD_LIMIT && arr.length > 1) { arr.pop(); s = JSON.stringify(arr); }
+  return s;
+}
+
+/* ---- row shapes ---- */
+function taskFromItem(it) {
+  const f = it.fields || {};
+  return {
+    id: String(it.id), key: f.TaskKey || "", entityId: f.EntityId || "", client: f.ClientName || "",
+    adviser: f.AdviserName || "", assignee: f.Assignee || "", subject: f.TaskSubject || f.Title || "",
+    status: canonStatus(f.Status), activated: spDate(f.ActivatedDate), due: spDate(f.DueDate), complete: spDate(f.CompleteDate),
+    latest: f.LatestComment || "", latestAt: f.LatestCommentAt || "", count: num(f.CommentCount), sig: f.CommentSig || "",
+    lastNotified: f.LastNotifiedAt || "", notifyCount: num(f.NotifyCount), comments: null
+  };
+}
+function taskCommentFields(comments) {
+  const top = comments[0];
+  return {
+    LatestComment: top ? top.text.slice(0, 4000) : "",
+    LatestCommentAt: top ? top.at : "",
+    CommentCount: comments.length,
+    CommentSig: commentSig(comments),
+    CommentsJson: serialiseThread(comments)
+  };
+}
+/* Ready-to-print name for the emails, so the flows don't have to undo Xplan's
+   "Surname, First" and "zz" conventions. */
+const assigneeDisplay = raw => flipName(raw) + (isInactiveName(raw) ? " (inactive)" : "");
+function taskCreateFields(t) {
+  const f = {
+    Title: (t.client + " — " + t.subject).slice(0, 255), TaskKey: t.key, EntityId: t.entityId, ClientName: t.client,
+    AdviserName: t.adviser, Assignee: t.assignee, AssigneeDisplay: assigneeDisplay(t.assignee), TaskSubject: t.subject, Status: t.status,
+    ...taskCommentFields(t.comments)
+  };
+  if (t.activated) f.ActivatedDate = toSpDate(t.activated);
+  if (t.due) f.DueDate = toSpDate(t.due);
+  if (t.complete) f.CompleteDate = toSpDate(t.complete);
+  return f;
+}
+const TASK_COMPARE = [
+  ["client", "ClientName", "Client"], ["adviser", "AdviserName", "Adviser"], ["assignee", "Assignee", "Assigned to"],
+  ["subject", "TaskSubject", "Task"], ["status", "Status", "Status"],
+  ["activated", "ActivatedDate", "Activated"], ["due", "DueDate", "Due"], ["complete", "CompleteDate", "Completed"]
+];
+const DATE_KEYS = ["activated", "due", "complete"];
+
+const adviserFromItem = it => ({ id: String(it.id), name: it.fields.Title || "", xplan: it.fields.XplanName || "", email: it.fields.Email || "",
+  region: it.fields.Region || "", active: it.fields.IsActive !== false && it.fields.IsActive !== "No",
+  supportEmails: it.fields.SupportEmails || "", managerEmails: it.fields.ManagerEmails || "" });
+const supportFromItem = it => ({ id: String(it.id), name: it.fields.Title || "", email: it.fields.Email || "",
+  advisers: String(it.fields.Advisers || "").split(/\n/).map(s => s.trim()).filter(Boolean) });
+const personFromItem = it => ({ id: String(it.id), name: it.fields.Title || "", email: it.fields.Email || "", region: it.fields.Region || "" });
+
+/* =========================================================================
+   State
+   ========================================================================= */
+const state = {
+  user: { name: "", email: "" }, role: {},
+  tasks: [], advisers: [], support: [], managers: [], admins: [], settings: {}, settingIds: {}, imports: [],
+  page: pref.get("page", "tasks"), tab: pref.get("tab", "Unactioned"),
+  f: Object.assign({ q: "", adviser: "", region: "", assignee: "", mine: false, overdue: false, pastDue: false }, pref.get("filters", {})),
+  sort: null, pageNo: 0, setTab: "advisers", loaded: false
+};
+/* Search and the card toggles are per visit — a forgotten "overdue only" would
+   look like missing tasks next week. */
+Object.assign(state.f, { q: "", overdue: false, pastDue: false });
+
+function setting(key) {
+  const def = KNOWN_SETTINGS.find(s => s.key === key);
+  const v = state.settings[key];
+  return v === undefined || v === "" || !isFinite(+v) ? (def ? def.def : 0) : +v;
+}
+
+async function loadAll() {
+  const [t, a, s, m, ad, st, im] = await Promise.all(["tasks", "advisers", "support", "managers", "admins", "settings", "imports"].map(k => db.list(k)));
+  state.tasks = t.map(taskFromItem);
+  state.advisers = a.map(adviserFromItem).sort((x, y) => x.name.localeCompare(y.name));
+  state.support = s.map(supportFromItem).sort((x, y) => x.name.localeCompare(y.name));
+  state.managers = m.map(personFromItem).sort((x, y) => x.name.localeCompare(y.name));
+  state.admins = ad.map(personFromItem).sort((x, y) => x.name.localeCompare(y.name));
+  state.settings = {}; state.settingIds = {};
+  st.forEach(it => { state.settings[it.fields.Title] = it.fields.Value; state.settingIds[it.fields.Title] = String(it.id); });
+  state.imports = im.map(it => ({ id: String(it.id), ...it.fields })).sort((x, y) => String(y.ImportedAt).localeCompare(String(x.ImportedAt)));
+  indexDirectory();
+  computeRole();
+  state.loaded = true;
+}
+
+let dirIndex = new Map();
+function indexDirectory() { dirIndex = new Map(state.advisers.map(a => [nameKey(a.xplan), a])); }
+const adviserOf = t => dirIndex.get(nameKey(t.adviser)) || null;
+const adviserLabel = raw => { const a = dirIndex.get(nameKey(raw)); return a && a.name ? a.name : flipName(raw); };
+const regionOf = t => { const a = adviserOf(t); return a ? a.region : ""; };
+
+function computeRole() {
+  const e = lc(state.user.email);
+  const r = state.role = {};
+  r.adviser = state.advisers.find(a => a.email && lc(a.email) === e) || null;
+  r.support = state.support.find(s => s.email && lc(s.email) === e) || null;
+  r.manager = state.managers.find(m => m.email && lc(m.email) === e) || null;
+  r.noAdmins = state.admins.length === 0;
+  r.admin = LOCAL || r.noAdmins || state.admins.some(a => lc(a.email) === e);
+  r.hasMine = !!(r.adviser || r.support || r.manager);
+  if (!r.hasMine) state.f.mine = false;
+  if (r.hasMine && pref.get("mineInit", false) === false) { state.f.mine = true; pref.set("mineInit", true); }
+}
+function roleLabel() {
+  const r = state.role, bits = [];
+  if (r.admin) bits.push("Admin");
+  if (r.adviser) bits.push("Adviser"); if (r.support) bits.push("Support"); if (r.manager) bits.push("Manager (" + r.manager.region + ")");
+  return bits.join(" · ") || "Viewer";
+}
+function mineMatch(t) {
+  const r = state.role; const k = nameKey(t.adviser);
+  if (r.adviser && nameKey(r.adviser.xplan) === k) return true;
+  if (r.support && r.support.advisers.some(n => nameKey(n) === k)) return true;
+  if (r.manager) { if (r.manager.region === "All") return true; const reg = regionOf(t); if (reg && reg === r.manager.region) return true; }
+  return false;
+}
+
+/* ---- task maths ---- */
+const isOpen = t => !CLOSED.includes(lc(t.status));
+function daysOpen(t) {
+  if (!t.activated) return null;
+  const end = isOpen(t) ? todayISO() : t.complete;
+  if (!end) return null;
+  return Math.max(0, diffDays(t.activated, end));
+}
+const isOverdue = t => isOpen(t) && (daysOpen(t) || 0) >= setting("OverdueDays");
+const isPastDue = t => isOpen(t) && t.due && t.due < todayISO();
+function daysClass(t) {
+  if (!isOpen(t)) return "";
+  const d = daysOpen(t) || 0, lim = setting("OverdueDays");
+  return d >= lim ? "red" : d >= Math.max(0, lim - 7) ? "amber" : "";
+}
+const statusClass = s => "st-" + (STATUSES.some(x => lc(x) === lc(s)) ? lc(s) : "other");
+
+/* =========================================================================
+   Shell
+   ========================================================================= */
+function applyTheme(t) { document.documentElement.setAttribute("data-theme", t); pref.set("theme", t); }
+
+function renderShell() {
+  const r = state.role;
+  const openCount = state.tasks.filter(isOpen).length;
+  const nav = [["tasks", "Tasks", ICON.tasks, openCount]];
+  if (r.admin) nav.push(["upload", "Upload report", ICON.upload], ["settings", "Settings", ICON.settings]);
+  if (!nav.some(n => n[0] === state.page)) state.page = "tasks";
+  $("#root").innerHTML =
+    '<div id="app"><aside id="sidebar">' +
+      '<div class="side-brand"><img src="CAA_White.png" alt="Coastal Advisory"><div class="side-pill">THE AMAZING WEALTH IMPLEMENTATION TRACKER</div></div>' +
+      '<nav class="side-nav">' + nav.map(n => '<button class="nav-btn' + (state.page === n[0] ? " active" : "") + '" data-page="' + n[0] + '">' + n[2] + "<span>" + n[1] + "</span>" +
+        (n[3] != null ? '<span class="nav-count">' + fmtN(n[3]) + "</span>" : "") + "</button>").join("") + "</nav>" +
+      '<div class="side-foot"><div><div class="side-user" title="' + esc(state.user.email) + '">' + esc(state.user.name || state.user.email) + '</div><div class="side-role">' + esc(roleLabel()) + "</div></div>" +
+        '<div class="side-actions"><button id="theme-btn">' + (document.documentElement.getAttribute("data-theme") === "dark" ? "Light mode" : "Dark mode") + "</button>" +
+        (LOCAL ? "" : '<button id="signout-btn">Sign out</button>') + "</div></div>" +
+    '</aside><main id="main"><div id="banners"></div><div id="page"></div></main></div>';
+  $$(".nav-btn").forEach(b => b.onclick = () => go(b.dataset.page));
+  $("#theme-btn").onclick = () => { applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"); renderShell(); };
+  const so = $("#signout-btn"); if (so) so.onclick = async () => { const app = await ensureMsal(); app.logoutRedirect({ account: app.getActiveAccount() }); };
+  const b = [];
+  if (LOCAL) b.push('<div class="banner warn"><strong>Local test mode.</strong> Data lives in this browser tab only — nothing is read from or written to SharePoint, and a reload starts empty.</div>');
+  if (!LOCAL && sp.missingLists.length) b.push('<div class="banner bad"><strong>Setup needed.</strong> Missing list' + (sp.missingLists.length > 1 ? "s" : "") + ": " + sp.missingLists.map(k => esc(LISTS[k].title)).join(", ") + ". " + (r.admin ? 'Settings → Lists can create them.' : "Ask an admin to finish setup.") + "</div>");
+  if (!LOCAL && r.noAdmins && !sp.missingLists.includes("admins")) b.push('<div class="banner info"><strong>No admins set yet</strong>, so everyone can upload and change settings. Add the admins in Settings → Admins to lock that down.</div>');
+  $("#banners").innerHTML = b.join("");
+  renderPage();
+}
+function go(page) { state.page = page; pref.set("page", page); closeDrawer(); renderShell(); window.scrollTo(0, 0); }
+function renderPage() {
+  if (state.page === "upload") renderUpload();
+  else if (state.page === "settings") renderSettings();
+  else renderTasks();
+}
+
+/* =========================================================================
+   Tasks page
+   ========================================================================= */
+const TABS = STATUSES.concat(["All"]);
+function renderTasks() {
+  const lastImp = state.imports[0];
+  const advOpts = Array.from(new Set(state.tasks.map(t => nameKey(t.adviser)))).map(k => {
+    const t = state.tasks.find(x => nameKey(x.adviser) === k); return [k, adviserLabel(t.adviser) + (isInactiveName(t.adviser) ? " (inactive)" : "")];
+  }).sort((a, b) => a[1].localeCompare(b[1]));
+  const asgOpts = Array.from(new Set(state.tasks.map(t => nameKey(t.assignee)).filter(Boolean))).map(k => {
+    const t = state.tasks.find(x => nameKey(x.assignee) === k); return [k, flipName(t.assignee) + (isInactiveName(t.assignee) ? " (inactive)" : "")];
+  }).sort((a, b) => a[1].localeCompare(b[1]));
+  const opt = (v, l, cur) => '<option value="' + esc(v) + '"' + (v === cur ? " selected" : "") + ">" + esc(l) + "</option>";
+  $("#page").innerHTML =
+    '<div class="page-head"><div><h1>Implementation tasks</h1><div class="sub">' +
+      (lastImp ? "Last report loaded " + esc(fmtDateTime(spDateTime(lastImp.ImportedAt))) + " by " + esc(lastImp.ImportedBy || "—") : "No report loaded yet") +
+      '</div></div><div style="display:flex;gap:8px"><button class="btn" id="exp-btn">' + ICON.download + 'Export CSV</button><button class="btn" id="ref-btn">' + ICON.refresh + "Refresh</button></div></div>" +
+    '<div class="cards" id="cards"></div>' +
+    '<div class="toolbar">' +
+      '<div class="grow"><input type="search" id="f-q" placeholder="Search client, Xplan ID, task or comment…" value="' + esc(state.f.q) + '"></div>' +
+      (state.role.hasMine ? '<span class="chip' + (state.f.mine ? " on" : "") + '" id="f-mine">My tasks</span>' : "") +
+      '<select id="f-adviser"><option value="">All advisers</option>' + advOpts.map(o => opt(o[0], o[1], state.f.adviser)).join("") + "</select>" +
+      '<select id="f-region"><option value="">All regions</option>' + REGIONS.concat(["Unassigned"]).map(r => opt(r, r, state.f.region)).join("") + "</select>" +
+      '<select id="f-assignee"><option value="">Anyone assigned</option>' + asgOpts.map(o => opt(o[0], o[1], state.f.assignee)).join("") + "</select>" +
+      '<button class="btn ghost sm" id="f-clear">Clear</button>' +
+    "</div>" +
+    '<div class="tabs" id="tabs"></div>' +
+    '<div class="panel"><div class="table-wrap" id="tbl"></div><div class="pager" id="pager"></div></div>';
+  const saveF = () => { const { q, ...rest } = state.f; pref.set("filters", rest); state.pageNo = 0; renderResults(); };
+  let qt; $("#f-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { state.f.q = e.target.value; saveF(); }, 150); };
+  $("#f-adviser").onchange = e => { state.f.adviser = e.target.value; saveF(); };
+  $("#f-region").onchange = e => { state.f.region = e.target.value; saveF(); };
+  $("#f-assignee").onchange = e => { state.f.assignee = e.target.value; saveF(); };
+  const mine = $("#f-mine"); if (mine) mine.onclick = () => { state.f.mine = !state.f.mine; mine.classList.toggle("on", state.f.mine); saveF(); };
+  $("#f-clear").onclick = () => { Object.assign(state.f, { q: "", adviser: "", region: "", assignee: "", mine: false, overdue: false, pastDue: false }); pref.set("filters", {}); renderTasks(); };
+  $("#ref-btn").onclick = async () => { await refresh(); toast("Refreshed"); };
+  $("#exp-btn").onclick = exportCsv;
+  $("#tbl").onclick = e => {
+    const th = e.target.closest("th[data-sort]");
+    if (th) { const k = th.dataset.sort; const cur = currentSort(); state.sort = { key: k, dir: cur.key === k ? -cur.dir : (["days", "activated", "due", "complete", "latest"].includes(k) ? -1 : 1) }; renderResults(); return; }
+    const tr = e.target.closest("tr[data-id]"); if (tr) openDrawer(tr.dataset.id);
+  };
+  renderResults();
+}
+
+function baseFiltered() {
+  const f = state.f, q = lc(f.q).trim();
+  return state.tasks.filter(t => {
+    if (f.mine && !mineMatch(t)) return false;
+    if (f.adviser && nameKey(t.adviser) !== f.adviser) return false;
+    if (f.assignee && nameKey(t.assignee) !== f.assignee) return false;
+    if (f.region) { const r = regionOf(t); if (f.region === "Unassigned" ? !!r : r !== f.region) return false; }
+    if (f.overdue && !isOverdue(t)) return false;
+    if (f.pastDue && !isPastDue(t)) return false;
+    if (q) {
+      const hay = lc(t.client + " " + t.entityId + " " + t.subject + " " + t.latest + " " + adviserLabel(t.adviser) + " " + flipName(t.assignee));
+      if (!q.split(/\s+/).every(w => hay.includes(w))) return false;
+    }
+    return true;
+  });
+}
+function currentSort() {
+  if (state.sort) return state.sort;
+  if (state.tab === "Complete" || state.tab === "Aborted") return { key: "complete", dir: -1 };
+  if (state.tab === "All") return { key: "activated", dir: -1 };
+  return { key: "days", dir: -1 };
+}
+const SORTERS = {
+  client: t => lc(t.client), adviser: t => lc(adviserLabel(t.adviser)), subject: t => lc(t.subject), status: t => STATUSES.indexOf(t.status),
+  assignee: t => lc(flipName(t.assignee)), activated: t => t.activated || "", due: t => t.due || "", complete: t => t.complete || "",
+  days: t => daysOpen(t) == null ? -1 : daysOpen(t), latest: t => t.latestAt || ""
+};
+
+function renderResults() {
+  const base = baseFiltered();
+  /* cards — open work within the current filters */
+  const open = state.tasks.filter(t => isOpen(t) && (!state.f.mine || mineMatch(t)));
+  const openF = base.filter(isOpen);
+  const lim = setting("OverdueDays");
+  const avg = openF.length ? Math.round(openF.reduce((s, t) => s + (daysOpen(t) || 0), 0) / openF.length) : 0;
+  const card = (k, v, h, dot, id, on) => (id ? '<button class="card' + (on ? " on" : "") + '" id="' + id + '">' : '<div class="card">') +
+    '<div class="k"><span class="dot" style="background:' + dot + '"></span>' + k + '</div><div class="v">' + v + '</div><div class="h">' + h + "</div>" + (id ? "</button>" : "</div>");
+  $("#cards").innerHTML =
+    card("Open tasks", fmtN(openF.length), "Unactioned, pending or actioned", "var(--s1)") +
+    card("Overdue", fmtN(openF.filter(isOverdue).length), lim + "+ days since activation · click to filter", "var(--bad-fg)", "c-overdue", state.f.overdue) +
+    card("Past due date", fmtN(openF.filter(isPastDue).length), "Open beyond Xplan due date · click to filter", "var(--warn-fg)", "c-pastdue", state.f.pastDue) +
+    card("Average days open", fmtN(avg), "Across open tasks shown", "var(--peach)");
+  $("#c-overdue").onclick = () => { state.f.overdue = !state.f.overdue; state.pageNo = 0; pref.set("filters", { ...state.f, q: undefined }); renderResults(); };
+  $("#c-pastdue").onclick = () => { state.f.pastDue = !state.f.pastDue; state.pageNo = 0; pref.set("filters", { ...state.f, q: undefined }); renderResults(); };
+
+  const counts = {}; TABS.forEach(t => counts[t] = 0);
+  base.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; counts.All++; });
+  if (!TABS.includes(state.tab)) state.tab = "Unactioned";
+  $("#tabs").innerHTML = TABS.map(t => '<button class="tab' + (state.tab === t ? " active" : "") + '" data-tab="' + t + '">' + t + '<span class="c">' + fmtN(counts[t]) + "</span></button>").join("");
+  $$("#tabs .tab").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; pref.set("tab", state.tab); state.sort = null; state.pageNo = 0; renderResults(); });
+
+  let rows = state.tab === "All" ? base : base.filter(t => t.status === state.tab);
+  const s = currentSort(), fn = SORTERS[s.key] || SORTERS.days;
+  rows = rows.slice().sort((a, b) => { const x = fn(a), y = fn(b); return (x < y ? -1 : x > y ? 1 : 0) * s.dir || lc(a.client).localeCompare(lc(b.client)); });
+  state.view = rows;
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (state.pageNo >= pages) state.pageNo = pages - 1;
+  const slice = rows.slice(state.pageNo * PAGE_SIZE, (state.pageNo + 1) * PAGE_SIZE);
+  const closedTab = state.tab === "Complete" || state.tab === "Aborted";
+  const cols = [["client", "Client"], ["adviser", "Adviser"], ["subject", "Task"], ["status", "Status"], ["assignee", "Assigned to"],
+    ["activated", "Activated"], closedTab ? ["complete", "Completed"] : ["due", "Due"], ["days", closedTab ? "Days taken" : "Days open"], ["latest", "Latest comment"]];
+  if (!state.tasks.length) {
+    $("#tbl").innerHTML = '<div class="empty"><div style="font-size:16px;font-weight:600;color:var(--ink);margin-bottom:6px">No tasks yet</div>' +
+      (state.role.admin ? 'Load the Xplan report from <a href="#" id="go-up">Upload report</a> to get started.' : "An admin needs to load the first Xplan report.") + "</div>";
+    const gu = $("#go-up"); if (gu) gu.onclick = e => { e.preventDefault(); go("upload"); };
+    $("#pager").innerHTML = ""; return;
+  }
+  if (!rows.length) { $("#tbl").innerHTML = '<div class="empty">No tasks match these filters.</div>'; $("#pager").innerHTML = ""; return; }
+  $("#tbl").innerHTML = '<table class="tbl"><thead><tr>' + cols.map(c => '<th class="sortable' + (c[0] === "days" ? " num" : "") + '" data-sort="' + c[0] + '">' + c[1] +
+      (s.key === c[0] ? '<span class="arr">' + (s.dir > 0 ? "▲" : "▼") + "</span>" : "") + "</th>").join("") + "</tr></thead><tbody>" +
+    slice.map(t => {
+      const d = daysOpen(t);
+      const dateCell = closedTab ? fmtDate(t.complete) : (t.due ? '<span class="' + (isPastDue(t) ? "late" : "") + '">' + fmtDate(t.due) + "</span>" : "");
+      return '<tr data-id="' + esc(t.id) + '">' +
+        '<td class="client-cell"><div class="cell-main">' + esc(t.client) + '</div><div class="cell-sub">Xplan ' + esc(t.entityId) + "</div></td>" +
+        '<td class="nowrap">' + esc(adviserLabel(t.adviser)) + (isInactiveName(t.adviser) ? '<span class="tag">inactive</span>' : "") + (regionOf(t) ? '<div class="cell-sub">' + esc(regionOf(t)) + "</div>" : "") + "</td>" +
+        '<td class="task-cell"><div class="clamp">' + esc(t.subject) + "</div></td>" +
+        '<td><span class="badge ' + statusClass(t.status) + '">' + esc(t.status || "—") + "</span></td>" +
+        '<td class="nowrap">' + esc(flipName(t.assignee)) + (isInactiveName(t.assignee) ? '<span class="tag">inactive</span>' : "") + "</td>" +
+        '<td class="nowrap">' + fmtDate(t.activated) + "</td>" +
+        '<td class="nowrap">' + dateCell + "</td>" +
+        '<td class="num"><span class="days ' + daysClass(t) + '">' + (d == null ? "—" : d) + "</span></td>" +
+        '<td class="cmt-cell">' + (t.latest ? '<div class="clamp">' + esc(t.latest) + '</div><div class="cell-sub">' + esc(fmtDateTime(t.latestAt)) + (t.count > 1 ? " · " + t.count + " comments" : "") + "</div>" : '<span class="muted">—</span>') + "</td>" +
+        "</tr>";
+    }).join("") + "</tbody></table>";
+  $("#pager").innerHTML = "<div>" + fmtN(state.pageNo * PAGE_SIZE + 1) + "–" + fmtN(Math.min(rows.length, (state.pageNo + 1) * PAGE_SIZE)) + " of " + fmtN(rows.length) + "</div>" +
+    '<div class="btns"><button class="btn sm" id="pg-prev"' + (state.pageNo ? "" : " disabled") + '>Previous</button><span style="align-self:center">Page ' + (state.pageNo + 1) + " of " + pages + '</span><button class="btn sm" id="pg-next"' + (state.pageNo < pages - 1 ? "" : " disabled") + ">Next</button></div>";
+  $("#pg-prev").onclick = () => { state.pageNo--; renderResults(); };
+  $("#pg-next").onclick = () => { state.pageNo++; renderResults(); };
+}
+
+function csvCell(v) {
+  let s = String(v == null ? "" : v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;           // formula-injection guard
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function exportCsv() {
+  const rows = state.view || [];
+  const head = ["Xplan ID", "Client", "Adviser", "Region", "Task", "Status", "Assigned to", "Activated", "Due", "Completed", "Days", "Latest comment", "Latest comment at"];
+  const lines = [head.join(",")].concat(rows.map(t => [t.entityId, t.client, adviserLabel(t.adviser), regionOf(t), t.subject, t.status, flipName(t.assignee),
+    fmtDate(t.activated), fmtDate(t.due), fmtDate(t.complete), daysOpen(t) == null ? "" : daysOpen(t), t.latest, fmtDateTime(t.latestAt)].map(csvCell).join(",")));
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "Wealth implementation tasks - " + state.tab + " - " + todayISO() + ".csv"; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/* ---- drawer ---- */
+let drawerId = null;
+async function openDrawer(id) {
+  const t = state.tasks.find(x => x.id === id); if (!t) return;
+  drawerId = id; renderDrawer(t);
+  $("#drawer").classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#drawer-backdrop").classList.add("open");
+  if (!t.comments) {
+    try { const m = await db.comments([t.id]); t.comments = m.get(t.id) || []; }
+    catch (e) { t.comments = []; toast("Couldn't load the comment thread: " + e.message, true); }
+    if (drawerId === id) renderDrawer(t);
+  }
+}
+function closeDrawer() { drawerId = null; $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); $("#drawer-backdrop").classList.remove("open"); }
+$("#drawer-backdrop").onclick = closeDrawer;
+function renderDrawer(t) {
+  const adv = adviserOf(t), d = daysOpen(t);
+  const sup = state.support.filter(s => s.advisers.some(n => nameKey(n) === nameKey(t.adviser))).map(s => s.name);
+  const fld = (k, v) => '<div><div class="fk">' + k + '</div><div class="fv">' + (v || '<span class="muted">—</span>') + "</div></div>";
+  const thread = t.comments == null ? '<div class="muted">Loading comments…</div>'
+    : !t.comments.length ? '<div class="muted">No comments on this task.</div>'
+    : t.comments.map((c, i) => '<div class="cmt' + (c.sys ? " sys" : "") + (i === 0 ? " latest" : "") + '"><div class="when">' + esc(fmtDateTime(c.at) || "No date") +
+        (c.sys ? '<span class="tag">Xplan</span>' : "") + (i === 0 ? '<span class="tag warn">latest</span>' : "") + '</div><div class="txt">' + esc(c.text) + "</div></div>").join("");
+  $("#drawer").innerHTML =
+    '<div class="dr-head"><div><h2>' + esc(t.client) + '</h2><div class="muted small">Xplan ID ' + esc(t.entityId) + '</div></div><button class="btn ghost sm x" id="dr-x" aria-label="Close">' + ICON.x + "</button></div>" +
+    '<div class="dr-body"><p class="dr-subject">' + esc(t.subject) + "</p>" +
+    '<div class="fields">' +
+      fld("Status", '<span class="badge ' + statusClass(t.status) + '">' + esc(t.status) + "</span>") +
+      fld(isOpen(t) ? "Days open" : "Days taken", d == null ? "" : '<span class="days ' + daysClass(t) + '">' + d + "</span>" + (isOverdue(t) ? ' <span class="tag bad">overdue</span>' : "")) +
+      fld("Adviser", esc(adviserLabel(t.adviser)) + (isInactiveName(t.adviser) ? '<span class="tag">inactive</span>' : "")) +
+      fld("Region", esc(adv ? adv.region : "")) +
+      fld("Adviser support", esc(sup.join(", "))) +
+      fld("Assigned to", esc(flipName(t.assignee)) + (isInactiveName(t.assignee) ? '<span class="tag">inactive</span>' : "")) +
+      fld("Activated", fmtDate(t.activated)) +
+      fld("Due", t.due ? '<span class="' + (isPastDue(t) ? "late" : "") + '">' + fmtDate(t.due) + "</span>" : "") +
+      fld("Completed", fmtDate(t.complete)) +
+      fld("Overdue emails", t.notifyCount ? plural(t.notifyCount, "sent") + " · last " + esc(fmtDateTime(spDateTime(t.lastNotified))) : "") +
+    "</div>" +
+    '<div class="thread-h"><span>Comments' + (t.comments ? " (" + t.comments.length + ")" : "") + '</span><span class="muted small">From Xplan · read-only</span></div>' + thread + "</div>";
+  $("#dr-x").onclick = closeDrawer;
+}
+/* A flow writes LastNotifiedAt as UTC; show it in Sydney time. */
+function spDateTime(v) {
+  if (!v) return ""; const d = new Date(v); if (isNaN(d)) return "";
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(d).map(x => [x.type, x.value]));
+  return p.year + "-" + p.month + "-" + p.day + "T" + (p.hour === "24" ? "00" : p.hour) + ":" + p.minute + ":00";
+}
+
+/* =========================================================================
+   Upload
+   ========================================================================= */
+let upload = null;   // { file, report, plan, include: Map, addAdv: Map, phase }
+
+function renderUpload() {
+  if (!state.role.admin) { $("#page").innerHTML = '<div class="empty">Only admins can upload reports.</div>'; return; }
+  const u = upload;
+  let body = "";
+  if (!u || u.phase === "pick") {
+    body = '<label class="drop" id="drop"><input type="file" id="file-in" accept=".csv,text/csv" hidden>' + ICON.file +
+      '<h3>Drop the Xplan report here</h3><div class="muted">Detailed Implementation Task Report, exported as CSV · or click to choose</div></label>' +
+      (u && u.error ? '<div class="banner bad" style="margin-top:14px">' + esc(u.error) + "</div>" : "") +
+      '<div class="panel panel-pad" style="margin-top:18px"><h3>How it works</h3><div class="muted">The report is read in your browser and compared with what the tracker already holds. ' +
+      "You'll see a preview of new tasks, status changes and new comments before anything is saved. Reports overlap week to week — tasks and comments already loaded are recognised and skipped.</div></div>";
+  } else if (u.phase === "busy") {
+    body = '<div class="panel panel-pad"><h3>' + esc(u.label) + '</h3><div class="progress"><div style="width:' + (u.total ? Math.round(100 * u.done / u.total) : 5) + '%"></div></div><div class="muted small">' +
+      (u.total ? fmtN(u.done) + " of " + fmtN(u.total) : "Working…") + "</div></div>";
+  } else if (u.phase === "preview") {
+    body = renderPreview(u);
+  } else if (u.phase === "done") {
+    const r = u.result;
+    body = '<div class="panel panel-pad"><h3>' + (r.failed ? "Update finished with errors" : "Tracker updated") + "</h3>" +
+      '<div class="sum-grid">' + sumBox("New tasks", r.created) + sumBox("Tasks updated", r.updated) + sumBox("Status changes", r.statusChanges) + sumBox("New comments", r.newComments) + (r.advisers ? sumBox("Advisers added", r.advisers) : "") + (r.failed ? sumBox("Failed", r.failed, true) : "") + "</div>" +
+      (r.undoWarning ? '<div class="banner warn">' + esc(r.undoWarning) + "</div>" : "") +
+      (r.failed ? '<div class="banner bad">' + esc(r.firstError || "") + " — run the same report again; anything already saved is recognised and skipped.</div>" : "") +
+      (r.advisers ? '<div class="banner info">New advisers were added to the directory without an email or region. Fill those in under Settings → Advisers so the emails reach them.</div>' : "") +
+      '<div style="display:flex;gap:8px"><button class="btn primary" id="u-view">View tasks</button><button class="btn" id="u-again">Upload another</button></div></div>';
+  }
+  $("#page").innerHTML = '<div class="page-head"><div><h1>Upload report</h1><div class="sub">Weekly Xplan Detailed Implementation Task Report</div></div></div>' + body;
+
+  if (!u || u.phase === "pick") {
+    const drop = $("#drop"), inp = $("#file-in");
+    inp.onchange = () => inp.files[0] && startAnalyse(inp.files[0]);
+    ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+    ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+    drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) startAnalyse(f); });
+  } else if (u.phase === "preview") bindPreview(u);
+  else if (u.phase === "done") { $("#u-view").onclick = () => { upload = null; go("tasks"); }; $("#u-again").onclick = () => { upload = null; renderUpload(); }; }
+}
+const sumBox = (k, v, hl) => '<div class="sum' + (hl ? " hl" : "") + '"><div class="v">' + fmtN(v) + '</div><div class="k">' + k + "</div></div>";
+function setBusy(label, done, total) {
+  if (!upload) return; Object.assign(upload, { phase: "busy", label, done: done || 0, total: total || 0 });
+  if (state.page === "upload") {
+    const p = $(".progress > div"), h = $("#page .panel h3");
+    if (p && h && h.textContent === label) { p.style.width = (total ? Math.round(100 * done / total) : 5) + "%"; $(".progress + .muted").textContent = total ? fmtN(done) + " of " + fmtN(total) : "Working…"; }
+    else renderUpload();
+  }
+}
+
+async function startAnalyse(file) {
+  upload = { file, phase: "busy" };
+  try {
+    setBusy("Reading " + file.name);
+    const text = await readFileText(file);
+    await sleep(10);
+    const report = buildReport(text);
+    upload.report = report;
+    await refresh(true);                         // compare against the latest, not what was loaded this morning
+    upload.plan = await analyse(report, (d, n) => setBusy("Checking existing comment threads", d, n));
+    upload.include = new Map(upload.plan.inactiveAdvisers.map(a => [a.key, true]));
+    upload.addAdv = new Map(upload.plan.newAdvisers.map(a => [a.key, true]));
+    upload.phase = "preview";
+  } catch (e) {
+    console.error(e);
+    upload = { phase: "pick", error: e.message || String(e) };
+  }
+  renderUpload();
+}
+
+async function analyse(report, onProgress) {
+  const existing = new Map(state.tasks.map(t => [t.key, t]));
+  const plan = { creates: [], updates: [], unchanged: 0, notInReport: 0, newAdvisers: [], inactiveAdvisers: [] };
+  /* advisers in the report */
+  const advs = new Map();
+  report.tasks.forEach(t => { const k = nameKey(t.adviser); if (!k) return; const a = advs.get(k) || { key: k, raw: t.adviser, tasks: 0, open: 0 }; a.tasks++; if (isOpen(t)) a.open++; if (isInactiveName(t.adviser)) a.raw = t.adviser; advs.set(k, a); });
+  for (const a of advs.values()) {
+    a.inactive = isInactiveName(a.raw);
+    if (a.inactive) plan.inactiveAdvisers.push(a);
+    if (!dirIndex.has(a.key)) plan.newAdvisers.push(a);
+  }
+  plan.inactiveAdvisers.sort((x, y) => flipName(x.raw).localeCompare(flipName(y.raw)));
+  plan.newAdvisers.sort((x, y) => x.inactive - y.inactive || flipName(x.raw).localeCompare(flipName(y.raw)));
+
+  /* threads to merge: only where the signature differs */
+  const need = report.tasks.map(t => existing.get(t.key)).filter((e, i) => e && e.sig !== report.tasks[i].sig);
+  const stored = need.length ? await db.comments(need.map(e => e.id), onProgress) : new Map();
+
+  const seen = new Set();
+  for (const t of report.tasks) {
+    const e = existing.get(t.key);
+    if (!e) { plan.creates.push({ t }); continue; }
+    seen.add(e.id);
+    const changes = [];
+    for (const [k, col, label] of TASK_COMPARE) if ((t[k] || "") !== (e[k] || "")) changes.push({ k, col, label, from: e[k] || "", to: t[k] || "" });
+    let merged = null, added = 0; const addedKeys = [];
+    if (e.sig !== t.sig) {
+      const old = stored.get(e.id) || [];
+      const m = new Map(old.map(c => [commentKey(c), c]));
+      for (const c of t.comments) { const k = commentKey(c); if (!m.has(k)) { m.set(k, c); added++; addedKeys.push(k); } }
+      if (added) merged = sortComments(Array.from(m.values()));
+    }
+    if (!changes.length && !added) { plan.unchanged++; continue; }
+    plan.updates.push({ e, t, changes, merged, added, addedKeys });
+  }
+  plan.notInReport = state.tasks.filter(t => !seen.has(t.id)).length;
+  return plan;
+}
+
+function planTotals(u) {
+  const inc = t => !isInactiveName(t.adviser) || u.include.get(nameKey(t.adviser)) !== false;
+  const creates = u.plan.creates.filter(c => inc(c.t));
+  const updates = u.plan.updates.filter(x => inc(x.t));
+  const status = updates.filter(x => x.changes.some(c => c.k === "status"));
+  const other = updates.filter(x => x.changes.some(c => c.k !== "status"));
+  const cmt = updates.filter(x => x.added);
+  const skipped = (u.plan.creates.length - creates.length) + (u.plan.updates.length - updates.length);
+  const advisers = u.plan.newAdvisers.filter(a => u.addAdv.get(a.key) && (!a.inactive || u.include.get(a.key) !== false));
+  return { creates, updates, status, other, cmt, newComments: cmt.reduce((s, x) => s + x.added, 0), skipped, advisers };
+}
+
+function renderPreview(u) {
+  const p = u.plan, r = u.report, T = planTotals(u);
+  const writes = T.creates.length + T.updates.length;
+  const sectionTable = (rows, head, fn) => '<div class="table-wrap"><table class="tbl"><thead><tr>' + head.map(h => "<th>" + h + "</th>").join("") + "</tr></thead><tbody>" +
+    rows.slice(0, 100).map(fn).join("") + "</tbody></table></div>" + (rows.length > 100 ? '<div class="muted small" style="padding:8px 2px">…and ' + fmtN(rows.length - 100) + " more</div>" : "");
+  const warn = [];
+  if (r.unknownStatuses.size) warn.push("Unrecognised status" + (r.unknownStatuses.size > 1 ? "es" : "") + ": " + Array.from(r.unknownStatuses.keys()).map(esc).join(", ") + ". These tasks load, but only show on the All tab.");
+  if (r.stats.skipped) warn.push(plural(r.stats.skipped, "row") + " had no client id or task subject and were skipped.");
+  if (r.stats.collisions) warn.push(plural(r.stats.collisions, "task") + " shared a client, task and activation date with another task — kept apart by due date.");
+  return '<div class="panel panel-pad">' +
+    '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h3>' + esc(u.file.name) + '</h3><div class="muted small">' +
+      fmtN(r.stats.rows) + " rows → " + fmtN(r.tasks.length) + " tasks · " + fmtN(r.stats.emptyComments) + " blank comment rows and " + fmtN(r.stats.dupComments) + " repeated comments ignored</div></div>" +
+      '<div style="display:flex;gap:8px"><button class="btn" id="u-cancel">Cancel</button><button class="btn primary" id="u-go"' + (writes || T.advisers.length ? "" : " disabled") + ">" +
+      (writes ? "Confirm &amp; update " + plural(writes, "task") : T.advisers.length ? "Add advisers" : "Nothing to update") + "</button></div></div>" +
+    '<div class="sum-grid">' + sumBox("New tasks", T.creates.length, true) + sumBox("Status changes", T.status.length, true) + sumBox("New comments", T.newComments, true) +
+      sumBox("Tasks with new comments", T.cmt.length) + sumBox("Other field changes", T.other.length) + sumBox("Already up to date", p.unchanged) +
+      (T.skipped ? sumBox("Skipped (inactive advisers)", T.skipped) : "") + "</div>" +
+    warn.map(w => '<div class="banner warn">' + w + "</div>").join("") +
+    (p.inactiveAdvisers.length ? '<details class="sect" open><summary>Inactive advisers in this report <span class="tag warn">confirm</span></summary><div class="inner">' +
+      '<div class="muted small" style="margin-bottom:6px">These advisers are marked inactive in Xplan (the "zz" prefix). Tick to load their tasks into the tracker, untick to leave them out of this upload.</div>' +
+      p.inactiveAdvisers.map(a => '<label class="adv-row"><input type="checkbox" data-inc="' + esc(a.key) + '"' + (u.include.get(a.key) !== false ? " checked" : "") + '><span class="n">' + esc(flipName(a.raw)) +
+        '<span class="tag">inactive</span></span><span class="muted small">' + plural(a.tasks, "task") + " · " + a.open + " open</span></label>").join("") + "</div></details>" : "") +
+    (p.newAdvisers.length ? '<details class="sect" open><summary>Advisers not in the directory yet (' + p.newAdvisers.length + ")</summary><div class=\"inner\">" +
+      '<div class="muted small" style="margin-bottom:6px">Ticked advisers are added to Settings → Advisers. You\'ll need to add their email and region there before they get emails.</div>' +
+      p.newAdvisers.map(a => '<label class="adv-row"><input type="checkbox" data-add="' + esc(a.key) + '"' + (u.addAdv.get(a.key) ? " checked" : "") + '><span class="n">' + esc(flipName(a.raw)) +
+        (a.inactive ? '<span class="tag">inactive</span>' : "") + '</span><span class="muted small">' + plural(a.tasks, "task") + "</span></label>").join("") + "</div></details>" : "") +
+    (T.status.length ? '<details class="sect"><summary>Status changes (' + fmtN(T.status.length) + ")</summary><div class=\"inner\">" +
+      sectionTable(T.status, ["Client", "Task", "From", "To"], x => { const c = x.changes.find(c => c.k === "status");
+        return "<tr><td>" + esc(x.t.client) + '</td><td class="task-cell"><div class="clamp">' + esc(x.t.subject) + '</div></td><td><span class="badge ' + statusClass(c.from) + '">' + esc(c.from) + '</span></td><td><span class="badge ' + statusClass(c.to) + '">' + esc(c.to) + "</span></td></tr>"; }) + "</div></details>" : "") +
+    (T.creates.length ? '<details class="sect"><summary>New tasks (' + fmtN(T.creates.length) + ")</summary><div class=\"inner\">" +
+      sectionTable(T.creates, ["Client", "Adviser", "Task", "Status", "Activated"], c => "<tr><td>" + esc(c.t.client) + "</td><td>" + esc(flipName(c.t.adviser)) + '</td><td class="task-cell"><div class="clamp">' + esc(c.t.subject) +
+        '</div></td><td><span class="badge ' + statusClass(c.t.status) + '">' + esc(c.t.status) + "</span></td><td>" + fmtDate(c.t.activated) + "</td></tr>") + "</div></details>" : "") +
+    (T.cmt.length ? '<details class="sect"><summary>New comments (' + fmtN(T.newComments) + " on " + plural(T.cmt.length, "task") + ")</summary><div class=\"inner\">" +
+      sectionTable(T.cmt, ["Client", "Task", "New", "Latest comment"], x => "<tr><td>" + esc(x.t.client) + '</td><td class="task-cell"><div class="clamp">' + esc(x.t.subject) + '</div></td><td class="num">' + x.added +
+        '</td><td class="cmt-cell"><div class="clamp">' + esc(x.merged[0] ? x.merged[0].text : "") + "</div></td></tr>") + "</div></details>" : "") +
+    (T.other.length ? '<details class="sect"><summary>Other field changes (' + fmtN(T.other.length) + ")</summary><div class=\"inner\">" +
+      sectionTable(T.other, ["Client", "Task", "Change"], x => "<tr><td>" + esc(x.t.client) + '</td><td class="task-cell"><div class="clamp">' + esc(x.t.subject) + "</div></td><td>" +
+        x.changes.filter(c => c.k !== "status").map(c => "<div><strong>" + esc(c.label) + ":</strong> " + esc(DATE_KEYS.includes(c.k) ? fmtDate(c.from) : c.from) + " → " + esc(DATE_KEYS.includes(c.k) ? fmtDate(c.to) : c.to) + "</div>").join("") + "</td></tr>") + "</div></details>" : "") +
+    (p.notInReport ? '<div class="muted small" style="margin-top:10px">' + plural(p.notInReport, "task") + " already in the tracker " + (p.notInReport === 1 ? "isn't" : "aren't") + " in this report. They're left as they are.</div>" : "") +
+    "</div>";
+}
+function bindPreview(u) {
+  $("#u-cancel").onclick = () => { upload = null; renderUpload(); };
+  $("#u-go").onclick = () => applyPlan(u);
+  $$("[data-inc]").forEach(cb => cb.onchange = () => { u.include.set(cb.dataset.inc, cb.checked); renderUpload(); });
+  $$("[data-add]").forEach(cb => cb.onchange = () => { u.addAdv.set(cb.dataset.add, cb.checked); renderUpload(); });
+}
+
+async function applyPlan(u) {
+  const T = planTotals(u);
+  const ops = [];
+  T.creates.forEach(c => ops.push({ kind: "create", list: "tasks", fields: taskCreateFields(c.t), ref: c }));
+  T.updates.forEach(x => {
+    const f = {};
+    x.changes.forEach(c => { f[c.col] = DATE_KEYS.includes(c.k) ? toSpDate(c.to) : c.to; });
+    if (x.changes.some(c => c.k === "assignee")) f.AssigneeDisplay = assigneeDisplay(x.t.assignee);
+    if (x.changes.some(c => c.k === "client" || c.k === "subject")) f.Title = (x.t.client + " — " + x.t.subject).slice(0, 255);
+    if (x.merged) Object.assign(f, taskCommentFields(x.merged));
+    ops.push({ kind: "update", list: "tasks", id: x.e.id, fields: f, ref: x });
+  });
+  const summary = { created: 0, updated: 0, statusChanges: 0, newComments: 0, failed: 0, advisers: 0, firstError: "" };
+  try {
+    if (T.advisers.length) {
+      setBusy("Adding advisers", 0, T.advisers.length);
+      for (const a of T.advisers) {
+        await db.create("advisers", { Title: flipName(a.raw), XplanName: a.raw, Email: "", IsActive: !a.inactive });
+        summary.advisers++;
+      }
+    }
+    setBusy("Saving to SharePoint", 0, ops.length);
+    const res = ops.length ? await db.bulk(ops, (d, n) => setBusy("Saving to SharePoint", d, n)) : [];
+    res.forEach((r, i) => {
+      const o = ops[i];
+      if (!r.ok) { summary.failed++; if (!summary.firstError) summary.firstError = r.error; return; }
+      if (o.kind === "create") summary.created++;
+      else { summary.updated++; if (o.ref.changes.some(c => c.k === "status")) summary.statusChanges++; summary.newComments += o.ref.added; }
+    });
+    const statusList = T.status.slice(0, 200).map(x => { const c = x.changes.find(c => c.k === "status"); return [x.t.client, x.t.subject.slice(0, 120), c.from, c.to]; });
+    /* The undo record: ids this upload created, and for each task it changed,
+       the previous field values plus the comment keys it added. */
+    const undo = { v: 1, created: [], updated: [] };
+    res.forEach((r, i) => {
+      const o = ops[i]; if (!r.ok) return;
+      if (o.kind === "create") { undo.created.push(+r.id); return; }
+      const x = o.ref, prev = {};
+      x.changes.forEach(c => prev[c.col] = c.from);
+      if (x.changes.some(c => c.k === "assignee")) prev.AssigneeDisplay = assigneeDisplay(x.e.assignee);
+      if (x.changes.some(c => c.k === "client" || c.k === "subject")) prev.Title = (x.e.client + " — " + x.e.subject).slice(0, 255);
+      undo.updated.push({ id: +x.e.id, prev, added: x.addedKeys || [] });
+    });
+    undo.created = toRanges(undo.created);
+    const undoText = JSON.stringify(undo), chunks = [];
+    for (let i = 0; i < undoText.length; i += THREAD_LIMIT) chunks.push(undoText.slice(i, i + THREAD_LIMIT));
+    const log = await db.create("imports", {
+      Title: u.file.name.slice(0, 255), FileName: u.file.name.slice(0, 255), ImportedBy: state.user.name || state.user.email,
+      ImportedAt: new Date().toISOString().replace(/\.\d+Z$/, "Z"), ReportRows: u.report.stats.rows, ReportTasks: u.report.tasks.length,
+      NewTasks: summary.created, StatusChanges: summary.statusChanges, NewComments: summary.newComments, OtherUpdates: T.other.length,
+      SummaryJson: JSON.stringify({ failed: summary.failed, skippedInactive: T.skipped, unchanged: u.plan.unchanged, advisersAdded: summary.advisers,
+        updated: undo.updated.length, undoChunks: LOCAL || sp.lists.undo ? chunks.length : 0, statusChanges: statusList }).slice(0, THREAD_LIMIT)
+    }).catch(e => { console.warn("import log", e); return null; });
+    if (log && log.id && (LOCAL || sp.lists.undo)) {
+      const wr = await db.bulk(chunks.map((c, i) => ({ kind: "create", list: "undo", fields: { Title: "Import " + log.id, ImportId: +log.id, Seq: i, Json: c } })));
+      if (wr.some(r => !r.ok)) summary.undoWarning = "The undo record didn't save fully, so this upload can't be deleted later.";
+    }
+    if (summary.advisers) await recomputeRouting().catch(() => {});
+  } catch (e) {
+    console.error(e); summary.failed = summary.failed || 1; summary.firstError = e.message;
+  }
+  await refresh(true);
+  upload = { phase: "done", result: summary };
+  renderShell();
+}
+
+/* =========================================================================
+   Settings
+   ========================================================================= */
+const SET_TABS = [["advisers", "Advisers"], ["support", "Adviser support"], ["managers", "Regional managers"], ["admins", "Admins"], ["notify", "Notifications"], ["history", "Import history"], ["lists", "Lists"]];
+function renderSettings() {
+  if (!state.role.admin) { $("#page").innerHTML = '<div class="empty">Only admins can change settings.</div>'; return; }
+  $("#page").innerHTML = '<div class="page-head"><div><h1>Settings</h1><div class="sub">People, notifications and setup</div></div></div>' +
+    '<div class="subtabs">' + SET_TABS.map(t => '<span class="chip' + (state.setTab === t[0] ? " on" : "") + '" data-st="' + t[0] + '">' + t[1] + "</span>").join("") + "</div><div id=\"set-body\"></div>";
+  $$("[data-st]").forEach(c => c.onclick = () => { state.setTab = c.dataset.st; renderSettings(); });
+  ({ advisers: setAdvisers, support: setSupport, managers: setManagers, admins: setAdmins, notify: setNotify, history: setHistory, lists: setLists }[state.setTab] || setAdvisers)();
+}
+const tableOf = (head, rows, empty) => '<div class="panel"><div class="table-wrap">' + (rows.length ? '<table class="tbl"><thead><tr>' + head.map(h => "<th>" + h + "</th>").join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody></table>" : '<div class="empty">' + empty + "</div>") + "</div></div>";
+const setHead = (title, sub, btn) => '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:12px"><div><h3 style="margin:0">' + title + '</h3><div class="muted small">' + sub + "</div></div>" + (btn || "") + "</div>";
+
+function setAdvisers() {
+  const open = new Map(); state.tasks.forEach(t => { if (isOpen(t)) open.set(nameKey(t.adviser), (open.get(nameKey(t.adviser)) || 0) + 1); });
+  const rows = state.advisers.map(a => {
+    const sup = state.support.filter(s => s.advisers.some(n => nameKey(n) === nameKey(a.xplan))).map(s => s.name);
+    const missing = !a.email || !a.region;
+    return '<tr data-id="' + a.id + '"><td><div class="cell-main">' + esc(a.name) + (a.active ? "" : '<span class="tag">inactive</span>') + (missing ? '<span class="tag bad">incomplete</span>' : "") + '</div><div class="cell-sub">Xplan: ' + esc(a.xplan) + "</div></td><td>" +
+      esc(a.email) + "</td><td>" + esc(a.region) + "</td><td>" + esc(sup.join(", ")) + '</td><td class="num">' + (open.get(nameKey(a.xplan)) || 0) + "</td></tr>";
+  });
+  $("#set-body").innerHTML = setHead("Advisers", "Name, email and region. Xplan name must match the report exactly (e.g. Simpson-Foster, Matthew).", '<button class="btn primary" id="add">Add adviser</button>') +
+    tableOf(["Adviser", "Email", "Region", "Support", "Open tasks"], rows, "No advisers yet. They're offered for adding on each upload.");
+  $("#add").onclick = () => adviserModal(null);
+  $$("#set-body tr[data-id]").forEach(tr => tr.onclick = () => adviserModal(state.advisers.find(a => a.id === tr.dataset.id)));
+}
+function adviserModal(a) {
+  const m = openModal({ title: a ? "Edit adviser" : "Add adviser",
+    body: '<div class="form-row"><label>Name</label><input type="text" id="m-name" value="' + esc(a ? a.name : "") + '" placeholder="Matthew Simpson-Foster"></div>' +
+      '<div class="form-row"><label>Xplan name</label><input type="text" id="m-xplan" value="' + esc(a ? a.xplan : "") + '" placeholder="Simpson-Foster, Matthew"><div class="hint">Exactly as it appears in the report\'s Adviser column. A "zz" prefix is ignored when matching.</div></div>' +
+      '<div class="form-row"><label>Email</label><input type="email" id="m-email" value="' + esc(a ? a.email : "") + '"></div>' +
+      '<div class="form-row"><label>Region</label><select id="m-region"><option value="">— choose —</option>' + REGIONS.map(r => '<option' + (a && a.region === r ? " selected" : "") + ">" + r + "</option>").join("") + "</select></div>" +
+      '<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="m-active"' + (!a || a.active ? " checked" : "") + '> Active — receives the weekly email and overdue notices</label>',
+    foot: (a ? '<button class="btn danger left" id="m-del">Delete</button>' : "") + '<button class="btn" id="m-cancel">Cancel</button><button class="btn primary" id="m-save">Save</button>' });
+  m.querySelector("#m-cancel").onclick = closeModal;
+  m.querySelector("#m-save").onclick = () => savePerson("advisers", a, {
+    Title: $("#m-name", m).value.trim(), XplanName: $("#m-xplan", m).value.trim(), Email: $("#m-email", m).value.trim(),
+    Region: $("#m-region", m).value, IsActive: $("#m-active", m).checked }, ["Title", "XplanName"]);
+  if (a) m.querySelector("#m-del").onclick = () => deletePerson("advisers", a);
+}
+
+function setSupport() {
+  const rows = state.support.map(s => '<tr data-id="' + s.id + '"><td class="cell-main">' + esc(s.name) + "</td><td>" + esc(s.email) + "</td><td>" + esc(s.advisers.map(adviserLabel).join(", ")) + "</td></tr>");
+  $("#set-body").innerHTML = setHead("Adviser support", "Support staff and the advisers they look after. They're copied into their advisers' weekly and overdue emails.", '<button class="btn primary" id="add">Add support</button>') +
+    tableOf(["Name", "Email", "Supports"], rows, "No support staff yet.");
+  $("#add").onclick = () => supportModal(null);
+  $$("#set-body tr[data-id]").forEach(tr => tr.onclick = () => supportModal(state.support.find(s => s.id === tr.dataset.id)));
+}
+function supportModal(s) {
+  const chosen = new Set((s ? s.advisers : []).map(nameKey));
+  const list = state.advisers.slice().sort((a, b) => (b.active - a.active) || a.name.localeCompare(b.name));
+  const m = openModal({ title: s ? "Edit support" : "Add support",
+    body: '<div class="form-row"><label>Name</label><input type="text" id="m-name" value="' + esc(s ? s.name : "") + '"></div>' +
+      '<div class="form-row"><label>Email</label><input type="email" id="m-email" value="' + esc(s ? s.email : "") + '"></div>' +
+      '<div class="form-row"><label>Advisers they support</label><div class="check-list">' +
+      (list.length ? list.map(a => '<label><input type="checkbox" value="' + esc(a.xplan) + '"' + (chosen.has(nameKey(a.xplan)) ? " checked" : "") + "> " + esc(a.name) + (a.active ? "" : '<span class="tag">inactive</span>') + (a.region ? ' <span class="muted small">· ' + esc(a.region) + "</span>" : "") + "</label>").join("")
+        : '<div class="muted small" style="padding:8px">Add advisers first.</div>') + "</div></div>",
+    foot: (s ? '<button class="btn danger left" id="m-del">Delete</button>' : "") + '<button class="btn" id="m-cancel">Cancel</button><button class="btn primary" id="m-save">Save</button>' });
+  m.querySelector("#m-cancel").onclick = closeModal;
+  m.querySelector("#m-save").onclick = () => savePerson("support", s, {
+    Title: $("#m-name", m).value.trim(), Email: $("#m-email", m).value.trim(),
+    Advisers: $$(".check-list input:checked", m).map(i => i.value).join("\n") }, ["Title", "Email"]);
+  if (s) m.querySelector("#m-del").onclick = () => deletePerson("support", s);
+}
+
+function setManagers() {
+  const rows = state.managers.map(p => '<tr data-id="' + p.id + '"><td class="cell-main">' + esc(p.name) + "</td><td>" + esc(p.email) + "</td><td>" + esc(p.region) + "</td></tr>");
+  $("#set-body").innerHTML = setHead("Regional managers", "Copied into overdue notices for advisers in their region. \"All\" covers every region.", '<button class="btn primary" id="add">Add manager</button>') +
+    tableOf(["Name", "Email", "Region"], rows, "No regional managers yet.");
+  $("#add").onclick = () => simplePersonModal("managers", null);
+  $$("#set-body tr[data-id]").forEach(tr => tr.onclick = () => simplePersonModal("managers", state.managers.find(p => p.id === tr.dataset.id)));
+}
+function setAdmins() {
+  const rows = state.admins.map(p => '<tr data-id="' + p.id + '"><td class="cell-main">' + esc(p.name) + "</td><td>" + esc(p.email) + "</td></tr>");
+  $("#set-body").innerHTML = setHead("Admins", "Admins can upload reports and change settings. Everyone else signed in can view.", '<button class="btn primary" id="add">Add admin</button>') +
+    (state.role.noAdmins ? '<div class="banner info">No admins yet — until one is added, everyone can reach this page. Add yourself first.</div>' : "") +
+    tableOf(["Name", "Email"], rows, "No admins yet.");
+  $("#add").onclick = () => simplePersonModal("admins", null);
+  $$("#set-body tr[data-id]").forEach(tr => tr.onclick = () => simplePersonModal("admins", state.admins.find(p => p.id === tr.dataset.id)));
+}
+function simplePersonModal(list, p) {
+  const isMgr = list === "managers";
+  const m = openModal({ title: (p ? "Edit " : "Add ") + (isMgr ? "regional manager" : "admin"),
+    body: '<div class="form-row"><label>Name</label><input type="text" id="m-name" value="' + esc(p ? p.name : (!p && !isMgr && state.role.noAdmins ? state.user.name : "")) + '"></div>' +
+      '<div class="form-row"><label>Email</label><input type="email" id="m-email" value="' + esc(p ? p.email : (!p && !isMgr && state.role.noAdmins ? state.user.email : "")) + '"></div>' +
+      (isMgr ? '<div class="form-row"><label>Region</label><select id="m-region">' + MANAGER_REGIONS.map(r => "<option" + (p && p.region === r ? " selected" : "") + ">" + r + "</option>").join("") + "</select></div>" : ""),
+    foot: (p ? '<button class="btn danger left" id="m-del">Delete</button>' : "") + '<button class="btn" id="m-cancel">Cancel</button><button class="btn primary" id="m-save">Save</button>' });
+  m.querySelector("#m-cancel").onclick = closeModal;
+  m.querySelector("#m-save").onclick = () => {
+    const f = { Title: $("#m-name", m).value.trim(), Email: $("#m-email", m).value.trim() };
+    if (isMgr) f.Region = $("#m-region", m).value;
+    savePerson(list, p, f, ["Title", "Email"]);
+  };
+  if (p) m.querySelector("#m-del").onclick = () => deletePerson(list, p);
+}
+async function savePerson(list, existing, fields, required) {
+  const miss = required.filter(k => !fields[k]);
+  if (miss.length) { toast("Please fill in " + miss.map(k => ({ Title: "the name", XplanName: "the Xplan name", Email: "the email" }[k] || k)).join(" and "), true); return; }
+  if (fields.Email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(fields.Email)) { toast("That email doesn't look right.", true); return; }
+  if (list === "admins" && !existing && !LOCAL && state.admins.length === 0 && lc(fields.Email) !== lc(state.user.email)) {
+    if (!await confirmDialog("Lock yourself out?", "You're adding the first admin and it isn't you. Once saved, only that person can reach Settings and Upload. Continue?", "Add anyway")) return;
+  }
+  try {
+    if (existing) await db.update(list, existing.id, fields); else await db.create(list, fields);
+    closeModal(); await refresh(true); await recomputeRouting(); toast("Saved");
+  } catch (e) { toast("Couldn't save: " + e.message, true); }
+}
+async function deletePerson(list, p) {
+  if (list === "admins" && state.admins.length === 1 && !LOCAL) { toast("Keep at least one admin.", true); return; }
+  if (!await confirmDialog("Delete " + (p.name || "this entry") + "?", "This removes them from the directory. Tasks are not affected.", "Delete", true)) return;
+  try { await db.remove(list, p.id); closeModal(); await refresh(true); await recomputeRouting(); toast("Deleted"); }
+  catch (e) { toast("Couldn't delete: " + e.message, true); }
+}
+/* Power Automate reads who to email straight off each adviser row, so the
+   support and manager addresses are denormalised onto it whenever the
+   directory changes. */
+async function recomputeRouting() {
+  const ops = [];
+  for (const a of state.advisers) {
+    const sup = state.support.filter(s => s.email && s.advisers.some(n => nameKey(n) === nameKey(a.xplan))).map(s => s.email);
+    const mgr = state.managers.filter(m => m.email && (m.region === "All" || (a.region && m.region === a.region))).map(m => m.email);
+    const f = { SupportEmails: Array.from(new Set(sup)).join("; "), ManagerEmails: Array.from(new Set(mgr)).join("; ") };
+    if (f.SupportEmails !== a.supportEmails || f.ManagerEmails !== a.managerEmails) { ops.push({ kind: "update", list: "advisers", id: a.id, fields: f }); Object.assign(a, { supportEmails: f.SupportEmails, managerEmails: f.ManagerEmails }); }
+  }
+  if (ops.length) await db.bulk(ops);
+  if (state.page === "settings") renderSettings();
+}
+
+function setNotify() {
+  $("#set-body").innerHTML = setHead("Notifications", "Emails are sent from the shared mailbox by Power Automate. These values are read by the flows each run.") +
+    '<div class="panel panel-pad">' + KNOWN_SETTINGS.map(s => '<div class="form-row" style="max-width:520px"><label>' + esc(s.label) + '</label><input type="number" min="0" step="1" data-set="' + s.key + '" value="' + esc(setting(s.key)) + '"><div class="hint">' + esc(s.desc) + "</div></div>").join("") +
+    '<button class="btn primary" id="set-save">Save</button></div>' +
+    '<div class="panel panel-pad" style="margin-top:14px"><h3>Schedule</h3><div class="kv" style="margin-top:8px">' +
+      '<div class="k">Weekly update</div><div>Monday 10:00am — each active adviser gets their open tasks (client, task, status, assigned to, days since activation, latest comment), with their support copied in.</div>' +
+      '<div class="k">Overdue notices</div><div>Checked daily. Open tasks at ' + setting("OverdueDays") + '+ days go to the adviser, their support and regional manager — one email per adviser, repeating every ' + (setting("ReminderDays") || "— (once only)") + (setting("ReminderDays") ? " days" : "") + ".</div></div></div>";
+  $("#set-save").onclick = async () => {
+    try {
+      for (const inp of $$("[data-set]")) {
+        const k = inp.dataset.set, v = String(Math.max(0, Math.round(+inp.value || 0))), def = KNOWN_SETTINGS.find(s => s.key === k);
+        if (String(state.settings[k]) === v) continue;
+        if (state.settingIds[k]) await db.update("settings", state.settingIds[k], { Value: v });
+        else await db.create("settings", { Title: k, Value: v, Description: def.desc.slice(0, 255) });
+      }
+      await refresh(true); toast("Saved"); renderSettings();
+    } catch (e) { toast("Couldn't save: " + e.message, true); }
+  };
+}
+function setHistory() {
+  const rows = state.imports.slice(0, 100).map((i, n) => {
+    const canUndo = n === 0 && safeJson(i.SummaryJson).undoChunks > 0;
+    return "<tr><td>" + esc(fmtDateTime(spDateTime(i.ImportedAt))) + "</td><td>" + esc(i.ImportedBy) + '</td><td>' + esc(i.FileName) + '</td><td class="num">' + fmtN(i.ReportTasks) +
+      '</td><td class="num">' + fmtN(i.NewTasks) + '</td><td class="num">' + fmtN(i.StatusChanges) + '</td><td class="num">' + fmtN(i.NewComments) + "</td><td>" +
+      (n === 0 ? (canUndo ? '<button class="btn danger sm" data-undo="' + esc(i.id) + '">Delete</button>' : '<span class="muted small" title="Uploaded before undo records were kept">No undo record</span>')
+        : '<span class="muted small" title="Only the most recent upload can be deleted">—</span>') + "</td></tr>";
+  });
+  $("#set-body").innerHTML = setHead("Import history", "Every confirmed upload. The most recent one can be deleted — that reverses everything it changed. Delete it and the one before becomes deletable, so you can step back several weeks.") +
+    '<div id="undo-busy"></div>' + tableOf(["When", "By", "File", "Tasks in report", "New", "Status changes", "New comments", ""], rows, "No uploads yet.");
+  $$("[data-undo]").forEach(b => b.onclick = () => deleteImport(state.imports.find(i => i.id === b.dataset.undo)));
+}
+
+const DATE_COLS = TASK_COMPARE.filter(c => DATE_KEYS.includes(c[0])).map(c => c[1]);
+async function deleteImport(imp) {
+  if (!imp || state.imports[0] !== imp) { toast("Only the most recent upload can be deleted — delete the newer ones first.", true); return; }
+  const sum = safeJson(imp.SummaryJson);
+  const ok = await confirmDialog("Delete this upload?",
+    "This reverses <strong>" + esc(imp.FileName) + "</strong> from " + esc(fmtDateTime(spDateTime(imp.ImportedAt))) + ":<br>• removes the " + plural(num(imp.NewTasks), "new task") +
+    " it added<br>• puts the " + plural(num(sum.updated), "task") + " it changed back how they were (status, dates, assignee and the comments it added)<br><br>Advisers it added to the directory are kept. This can't be undone.",
+    "Delete upload", true);
+  if (!ok) return;
+  const busy = (label, d, n) => { const el = $("#undo-busy"); if (el) el.innerHTML = '<div class="panel panel-pad" style="margin-bottom:12px"><h3>' + esc(label) + '</h3><div class="progress"><div style="width:' + (n ? Math.round(100 * d / n) : 5) + '%"></div></div><div class="muted small">' + (n ? fmtN(d) + " of " + fmtN(n) : "Working…") + "</div></div>"; };
+  $$("[data-undo]").forEach(b => b.disabled = true);
+  try {
+    busy("Reading the undo record");
+    const rows = (await db.undoRows(imp.id)).sort((a, b) => num(a.fields.Seq) - num(b.fields.Seq));
+    if (!rows.length || (sum.undoChunks && rows.length !== sum.undoChunks)) throw new Error("The undo record for this upload is incomplete, so it can't be reversed safely.");
+    const undo = JSON.parse(rows.map(r => r.fields.Json || "").join(""));
+    const need = undo.updated.filter(x => x.added && x.added.length).map(x => String(x.id));
+    const threads = need.length ? await db.comments(need, (d, n) => busy("Reading comment threads", d, n)) : new Map();
+    const ops = fromRanges(undo.created).map(id => ({ kind: "delete", list: "tasks", id: String(id) }));
+    for (const x of undo.updated) {
+      const f = {};
+      for (const [col, v] of Object.entries(x.prev || {})) f[col] = DATE_COLS.includes(col) ? toSpDate(v) : v;
+      if (x.added && x.added.length) {
+        const th = threads.get(String(x.id));
+        if (th) { const drop = new Set(x.added); Object.assign(f, taskCommentFields(th.filter(c => !drop.has(commentKey(c))))); }
+      }
+      if (Object.keys(f).length) ops.push({ kind: "update", list: "tasks", id: String(x.id), fields: f });
+    }
+    busy("Reversing changes", 0, ops.length);
+    const res = await db.bulk(ops, (d, n) => busy("Reversing changes", d, n));
+    /* a task that's already gone counts as done, so a retry after a partial failure is safe */
+    const failed = res.filter(r => !r.ok && r.status !== 404);
+    if (failed.length) throw new Error(plural(failed.length, "change") + " couldn't be reversed (" + (failed[0].error || "unknown error") + "). Nothing was lost — press Delete again to retry.");
+    busy("Removing the upload record");
+    await db.bulk(rows.map(r => ({ kind: "delete", list: "undo", id: String(r.id) })).concat([{ kind: "delete", list: "imports", id: imp.id }]));
+    await refresh(true); renderShell();
+    toast("Upload deleted — " + plural(fromRanges(undo.created).length, "task") + " removed, " + plural(undo.updated.length, "task") + " restored");
+  } catch (e) {
+    console.error(e);
+    const el = $("#undo-busy"); if (el) el.innerHTML = '<div class="banner bad">' + esc(e.message) + "</div>";
+    $$("[data-undo]").forEach(b => b.disabled = false);
+  }
+}
+function setLists() {
+  $("#set-body").innerHTML = setHead("Lists", LOCAL ? "Local test mode — no SharePoint connection." : "On " + esc(sp.siteName || CONFIG.sitePath) + ". Check makes sure every list and column exists; Create adds whatever is missing.",
+    LOCAL ? "" : '<div style="display:flex;gap:8px"><button class="btn" id="chk">Check lists</button><button class="btn primary" id="mk">Create missing</button></div>') +
+    '<div class="panel panel-pad" id="chk-out">' + (LOCAL ? '<div class="muted">Open the app from GitHub Pages (or add <code>?live=1</code>) to work against SharePoint.</div>'
+      : '<div class="muted">Press Check lists.</div>') + "</div>" +
+    '<div class="panel panel-pad" style="margin-top:14px"><div class="kv"><div class="k">Site</div><div class="mono">' + esc(CONFIG.sitePath) + '</div><div class="k">Client ID</div><div class="mono">' + esc(CONFIG.clientId) +
+    '</div><div class="k">Redirect URI</div><div class="mono">' + esc(redirectUri()) + "</div></div></div>";
+  if (LOCAL) return;
+  $("#chk").onclick = () => checkLists(false);
+  $("#mk").onclick = () => checkLists(true);
+}
+function colDef([name, type, indexed]) {
+  const d = { name };
+  if (indexed) d.indexed = true;
+  if (type === "text") d.text = {};
+  else if (type === "note") d.text = { allowMultipleLines: true, textType: "plain", linesForEditing: 6 };
+  else if (type === "number") d.number = {};
+  else if (type === "bool") d.boolean = {};
+  else if (type === "date") d.dateTime = { format: "dateOnly" };
+  else if (type === "datetime") d.dateTime = { format: "dateTime" };
+  return d;
+}
+async function checkLists(create) {
+  const out = $("#chk-out"); out.innerHTML = '<div class="muted">Checking…</div>';
+  const lines = [];
+  try {
+    await remote.init();
+    for (const [k, def] of Object.entries(LISTS)) {
+      if (!sp.lists[k]) {
+        if (!create) { lines.push('<div><span class="check-bad">✕ ' + esc(def.title) + "</span> — list missing</div>"); continue; }
+        try {
+          await graph("/sites/" + sp.siteId + "/lists", { method: "POST", body: { displayName: def.title, list: { template: "genericList" }, columns: def.cols.map(colDef) } });
+        } catch (e) {
+          await graph("/sites/" + sp.siteId + "/lists", { method: "POST", body: { displayName: def.title, list: { template: "genericList" }, columns: def.cols.map(c => colDef([c[0], c[1]])) } });
+        }
+        lines.push('<div><span class="check-ok">✓ ' + esc(def.title) + "</span> — created with " + def.cols.length + " columns</div>");
+        continue;
+      }
+      const cols = await graphAll(remote.path(k) + "/columns?$select=name,displayName");
+      const have = new Set(cols.map(c => c.name));
+      const miss = def.cols.filter(c => !have.has(c[0]));
+      if (!miss.length) { lines.push('<div><span class="check-ok">✓ ' + esc(def.title) + "</span></div>"); continue; }
+      if (!create) { lines.push('<div><span class="check-bad">✕ ' + esc(def.title) + "</span> — missing columns: " + miss.map(c => "<code>" + c[0] + "</code>").join(", ") + "</div>"); continue; }
+      for (const c of miss) {
+        try { await graph(remote.path(k) + "/columns", { method: "POST", body: colDef(c) }); }
+        catch (e) { await graph(remote.path(k) + "/columns", { method: "POST", body: colDef([c[0], c[1]]) }); }
+      }
+      lines.push('<div><span class="check-ok">✓ ' + esc(def.title) + "</span> — added " + miss.map(c => "<code>" + c[0] + "</code>").join(", ") + "</div>");
+    }
+    if (create) { await remote.init(); await refresh(true); renderShell(); state.setTab = "lists"; }
+    const o = $("#chk-out"); if (o) o.innerHTML = lines.join("");
+  } catch (e) {
+    const o = $("#chk-out"); if (o) o.innerHTML = lines.join("") + '<div class="banner bad" style="margin-top:10px">' + esc(e.message) + (/403|denied/i.test(e.message) ? " — creating lists needs Owner (or Design) rights on the site." : "") + "</div>";
+  }
+}
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+async function refresh(quiet) {
+  try { await loadAll(); }
+  catch (e) { console.error(e); toast("Couldn't load from SharePoint: " + e.message, true); return; }
+  if (quiet) return;
+  if (drawerId) { const t = state.tasks.find(x => x.id === drawerId); if (t) renderDrawer(t); else closeDrawer(); }
+  renderShell();
+}
+function renderGate(msg, err) {
+  $("#root").innerHTML = '<div class="gate"><div class="gate-card"><img src="CAA_White.png" alt="Coastal Advisory"><h1>Wealth Implementation Tracker</h1>' +
+    "<p>" + (msg || "Sign in with your Coastal Microsoft account to continue.") + "</p>" +
+    '<button class="btn primary" id="signin">Sign in with Microsoft</button>' + (err ? '<div class="banner bad err">' + err + "</div>" : "") + "</div></div>";
+  $("#signin").onclick = async () => { try { const app = await ensureMsal(); await app.loginRedirect({ scopes: SCOPES }); } catch (e) { renderGate(null, explainAuthError(e)); } };
+}
+async function boot() {
+  if (LOCAL) {
+    db = local; await local.init();
+    state.user = { name: "Local tester", email: "local@test" };
+    await loadAll(); renderShell(); return;
+  }
+  $("#root").innerHTML = '<div class="gate"><div class="gate-card"><img src="CAA_White.png" alt=""><h1>Wealth Implementation Tracker</h1><p>Loading…</p></div></div>';
+  try {
+    const app = await ensureMsal();
+    const acc = app.getActiveAccount();
+    if (!acc) { renderGate(); return; }
+    state.user = { name: acc.name || "", email: acc.username || "" };
+    db = remote;
+    await remote.init();
+    await loadAll();
+    renderShell();
+  } catch (e) {
+    console.error(e);
+    renderGate("Something stopped the tracker loading.", explainAuthError(e));
+  }
+}
+boot();
+</script>
+</body>
+</html>
