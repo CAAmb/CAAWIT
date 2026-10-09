@@ -200,6 +200,19 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;padding:1px 6px;border-radius:5px;background:var(--mute-bg);color:var(--mute-fg);margin-left:5px;vertical-align:1px}
 .tag.warn{background:var(--warn-bg);color:var(--warn-fg)}
 .tag.bad{background:var(--bad-bg);color:var(--bad-fg)}
+.tag.nb{background:var(--peach);color:var(--navy)}
+.seg-group{display:inline-flex;padding:3px;border:1px solid var(--line-strong);border-radius:var(--r-pill);background:var(--surface)}
+.seg{border:0;background:transparent;padding:6px 13px;border-radius:var(--r-pill);cursor:pointer;font-size:13px;white-space:nowrap;color:var(--ink-2)}
+.seg.on{background:var(--navy);color:#fff}
+:root[data-theme="dark"] .seg.on{background:var(--sky);color:var(--navy)}
+.tl{display:flex;flex-direction:column;gap:8px}
+.tl-row{border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px}
+.tl-row.cur{border-color:var(--s1)}
+.tl-top{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+.tl-w{margin-left:auto;font-variant-numeric:tabular-nums}
+.tl-bar{height:6px;border-radius:var(--r-pill);background:var(--mute-bg);overflow:hidden;margin-bottom:6px}
+.tl-bar > div{height:100%;background:var(--peach);border-radius:var(--r-pill)}
+.tl-row.cur .tl-bar > div{background:var(--s1)}
 .days{font-weight:700;font-variant-numeric:tabular-nums}
 .days.amber{color:var(--warn-fg)}
 .days.red{color:var(--bad-fg)}
@@ -339,10 +352,14 @@ const PAGE_SIZE = 50;
 
 /* Settings are ROWS in WITSettings (Title / Value / Description). */
 const KNOWN_SETTINGS = [
-  { key: "OverdueDays", def: 30, label: "Overdue after (days)",
+  { key: "OverdueDays", def: 30, group: "notify", label: "Overdue after (days)",
     desc: "An open task this many days past its activation date is overdue. The adviser, their support and their regional manager are emailed." },
-  { key: "ReminderDays", def: 7, label: "Repeat reminder every (days)",
-    desc: "While a task stays open and overdue, the email repeats this often. 0 sends it once only." }
+  { key: "ReminderDays", def: 7, group: "notify", label: "Repeat reminder every (days)",
+    desc: "While a task stays open and overdue, the email repeats this often. 0 sends it once only." },
+  { key: "StageAmberWeeks", def: 4, group: "stages", label: "Amber after (weeks in a stage)",
+    desc: "A lead this many weeks in its current stage shows amber." },
+  { key: "StageRedWeeks", def: 8, group: "stages", label: "Red after (weeks in a stage)",
+    desc: "A lead this many weeks in its current stage shows red and counts as stuck." }
 ];
 
 /* List schemas. [name, type, indexed]. "note" = multi-line plain text. */
@@ -366,11 +383,28 @@ const LISTS = {
     ["OtherUpdates", "number"], ["SummaryJson", "note"]] },
   /* What each upload changed, so it can be reversed. Chunked across rows
      because one multi-line column holds 63,999 characters. Read on demand only. */
-  undo:     { title: "WITImportUndo", cols: [["ImportId", "number", true], ["Seq", "number"], ["Json", "note"]] }
+  undo:     { title: "WITImportUndo", cols: [["ImportId", "number", true], ["Seq", "number"], ["Json", "note"]] },
+  /* One row per Xplan lead (Leads Id), from the Leads Stage History report. */
+  leads: { title: "WITLeads", cols: [
+    ["LeadId", "text", true], ["EntityId", "text", true], ["ClientName", "text"], ["AdviserName", "text", true],
+    ["LeadOwner", "text"], ["Category", "text"], ["EntityStatus", "text"], ["CsaClient", "text"], ["LeadName", "text"],
+    ["Business", "text", true], ["DueDate", "date"], ["CurrentStage", "text", true], ["ForecastRevenue", "number"],
+    ["ForecastFUA", "number"], ["StageSince", "text"], ["FirstSeenAt", "text"], ["LastModifiedAt", "text"],
+    ["EventCount", "number"], ["EventSig", "text"], ["EventsJson", "note"]] },
+  /* Lead stages: order and visibility for the tabs, shared by everyone. */
+  stages: { title: "WITStages", cols: [["SortOrder", "number"], ["Hidden", "bool"]] }
 };
 /* Everything but the thread is loaded up front; threads are fetched when a
-   task is opened or an import needs to merge one. */
-const TASK_SELECT = ["Title"].concat(LISTS.tasks.cols.map(c => c[0]).filter(n => n !== "CommentsJson"));
+   row is opened or an import needs to merge one. */
+const SELECTS = {
+  tasks: ["Title"].concat(LISTS.tasks.cols.map(c => c[0]).filter(n => n !== "CommentsJson")),
+  leads: ["Title"].concat(LISTS.leads.cols.map(c => c[0]).filter(n => n !== "EventsJson"))
+};
+
+const DEFAULT_STAGES = ["Prospect", "Qualification", "Discovery / Review", "Proposition", "Research / Modelling", "Proposal/Quote",
+  "Authority to Proceed", "Advice Preparation", "Advice Prepared", "Advice Presentation", "Implementation", "Revenue Received",
+  "Re-engage", "Closed Converted", "Closed Lost", "Not Proceeding"];
+const DEFAULT_HIDDEN_STAGES = ["Closed Converted", "Closed Lost", "Not Proceeding"];
 
 /* ---------------- small helpers ---------------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -492,6 +526,7 @@ document.addEventListener("keydown", e => {
 
 const ICON = {
   tasks: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg>',
+  stages: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h7l2 3H3zM3 12h12l2 3H3zM3 18h17"/></svg>',
   upload: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>',
   refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20 11a8 8 0 10-2.3 5.7M20 5v6h-6"/></svg>',
@@ -547,7 +582,7 @@ const commentSig = list => cyrb53(list.map(commentKey).sort().join("\n"));
    id, so a task is client id + activation date + subject. Two genuinely
    different tasks sharing all three are split by due date. */
 function buildReport(text) {
-  const rows = parseCSV(text);
+  const rows = Array.isArray(text) ? text : parseCSV(text);
   if (!rows.length) throw new Error("The file is empty.");
   const head = rows[0].map(normHeader);
   const idx = {}; const missing = [];
@@ -555,8 +590,8 @@ function buildReport(text) {
     const i = head.indexOf(normHeader(label));
     if (i < 0) missing.push(label); idx[k] = i;
   }
-  if (missing.length) throw new Error("This doesn't look like the Detailed Implementation Task Report — missing column" +
-    (missing.length > 1 ? "s" : "") + ": " + missing.join(", ") + ".");
+  if (missing.length) throw new Error("This isn't one of the reports the tracker reads. It expects the Detailed Implementation Task Report or the Leads Stage History report. " +
+    "(As a task report it's missing: " + missing.join(", ") + ".)");
 
   const stats = { rows: rows.length - 1, emptyComments: 0, dupComments: 0, skipped: 0, collisions: 0 };
   const unknownStatuses = new Map();
@@ -593,9 +628,126 @@ function buildReport(text) {
       tasks.push(t);
     });
   }
-  return { tasks, stats, unknownStatuses };
+  return { kind: "tasks", items: tasks, tasks, stats, unknownStatuses };
 }
 function canonStatus(s) { const hit = STATUSES.find(x => lc(x) === lc(s)); return hit || String(s || "").trim(); }
+
+/* ---- Leads Stage History report ----
+   One row per change to a lead (stage move, revenue edit, re-save). Leads Id is
+   a real unique id, so a lead is simply every row sharing it. Rows are kept as
+   "events"; the stage timeline is worked out from them. */
+const LEAD_COLS = {
+  entityId: "Entity Id", client: "Client and Partner Name", adviser: "Client Adviser", category: "Category",
+  entityStatus: "Entity Status", csa: "CSA Client?", leadId: "Leads Id", leadName: "Leads Name", due: "Leads Date Due",
+  from: "Old Stage", to: "New Stage", at: "Modified At", rev: "Forecast Revenue", fua: "Forecast FUA",
+  current: "Current Stage", owner: "Leads | Owner"
+};
+const money = s => { const n = parseFloat(String(s || "").replace(/[$,\s]/g, "")); return isFinite(n) ? n : 0; };
+const eventKey = e => [e.at, e.from, e.to, e.rev, e.fua].join("|");
+const sortEvents = list => list.sort((a, b) => a.at < b.at ? 1 : a.at > b.at ? -1 : 0);   // newest first
+const eventSig = list => cyrb53(list.map(eventKey).sort().join("\n"));
+const isNB = name => /\bNB\b/.test(String(name || ""));
+/* "1. [CAA] v0126. Existing Client - Progress Meeting - AUGUST REVIEW" → "Existing Client - Progress Meeting - AUGUST REVIEW" */
+const cleanLeadName = s => String(s || "").replace(/^\s*(?:[A-Z0-9]{1,2}\.\s*)?\[[A-Za-z]+\]\s*v\d+\.?\s*/, "").trim() || String(s || "").trim();
+
+function parseReport(text) {
+  const rows = parseCSV(text);
+  if (!rows.length) throw new Error("The file is empty.");
+  const head = rows[0].map(normHeader);
+  if (Object.values(LEAD_COLS).every(l => head.includes(normHeader(l)))) return buildLeads(rows);
+  return buildReport(rows);
+}
+
+function buildLeads(rows) {
+  const head = rows[0].map(normHeader), idx = {};
+  for (const [k, label] of Object.entries(LEAD_COLS)) idx[k] = head.indexOf(normHeader(label));
+  const stats = { rows: rows.length - 1, skipped: 0, dupRows: 0, noStageRows: 0 };
+  const groups = new Map();
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]; const g = k => String(row[idx[k]] == null ? "" : row[idx[k]]).trim();
+    const leadId = g("leadId");
+    if (!leadId) { stats.skipped++; continue; }
+    const ev = { at: parseAuDateTime(g("at")), from: g("from"), to: g("to"), rev: money(g("rev")), fua: money(g("fua")) };
+    let L = groups.get(leadId);
+    if (!L) groups.set(leadId, L = { events: new Map(), latestAt: null, row: null });
+    const k = eventKey(ev);
+    if (L.events.has(k)) stats.dupRows++; else L.events.set(k, ev);
+    if (!ev.from) stats.noStageRows++;
+    /* the lead's details come from its most recent row */
+    if (L.latestAt === null || ev.at >= L.latestAt) {
+      L.latestAt = ev.at;
+      L.row = { entityId: g("entityId"), client: g("client"), adviser: g("adviser"), owner: g("owner"), category: g("category"),
+        entityStatus: g("entityStatus"), csa: g("csa"), leadName: g("leadName"), due: parseAuDate(g("due")), stage: g("current") || g("to"), rev: ev.rev, fua: ev.fua };
+    }
+  }
+  const leads = [], stagesSeen = new Set();
+  for (const [leadId, L] of groups) {
+    const events = sortEvents(Array.from(L.events.values()));
+    const l = { key: leadId, leadId, ...L.row, business: isNB(L.row.leadName) ? "New business" : "Existing", events, sig: eventSig(events) };
+    events.forEach(e => { if (e.to) stagesSeen.add(e.to); if (e.from) stagesSeen.add(e.from); });
+    if (l.stage) stagesSeen.add(l.stage);
+    leads.push(l);
+  }
+  return { kind: "leads", items: leads, stats, stagesSeen, unknownStatuses: new Map() };
+}
+
+/* Stage timeline: walk the events oldest first and start a new segment each
+   time the stage actually changes. Revenue edits and re-saves don't. */
+function stageSegments(events, currentStage) {
+  const asc = events.slice().sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
+  const segs = [];
+  for (const e of asc) {
+    const stage = e.to || (segs.length ? "" : e.from);
+    if (!stage || !e.at) continue;
+    if (!segs.length || segs[segs.length - 1].stage !== stage) segs.push({ stage, start: e.at });
+  }
+  if (currentStage && (!segs.length || segs[segs.length - 1].stage !== currentStage) && asc.length)
+    segs.push({ stage: currentStage, start: asc[asc.length - 1].at });
+  const today = todayISO();
+  segs.forEach((s, i) => { s.end = segs[i + 1] ? segs[i + 1].start : ""; s.days = Math.max(0, diffDays(s.start.slice(0, 10), (s.end || today).slice(0, 10))); s.current = !segs[i + 1]; });
+  return segs;
+}
+function parseEvents(json) {
+  if (!json) return [];
+  try { return JSON.parse(json).map(a => ({ at: a[0] || "", from: a[1] || "", to: a[2] || "", rev: num(a[3]), fua: num(a[4]) })); } catch (e) { return []; }
+}
+function leadEventFields(events, stage) {
+  const segs = stageSegments(events, stage);
+  const ats = events.map(e => e.at).filter(Boolean).sort();
+  return {
+    StageSince: segs.length ? segs[segs.length - 1].start : "",
+    FirstSeenAt: ats[0] || "", LastModifiedAt: ats[ats.length - 1] || "",
+    EventCount: events.length, EventSig: eventSig(events),
+    EventsJson: JSON.stringify(sortEvents(events.slice()).map(e => [e.at, e.from, e.to, e.rev, e.fua])).slice(0, THREAD_LIMIT)
+  };
+}
+const leadTitle = l => (l.client + " — " + cleanLeadName(l.leadName)).slice(0, 255);
+function leadCreateFields(l) {
+  const f = {
+    Title: leadTitle(l), LeadId: l.leadId, EntityId: l.entityId, ClientName: l.client, AdviserName: l.adviser, LeadOwner: l.owner,
+    Category: l.category, EntityStatus: l.entityStatus, CsaClient: l.csa, LeadName: String(l.leadName).slice(0, 255), Business: l.business,
+    CurrentStage: l.stage, ForecastRevenue: l.rev, ForecastFUA: l.fua, ...leadEventFields(l.events, l.stage)
+  };
+  if (l.due) f.DueDate = toSpDate(l.due);
+  return f;
+}
+function leadFromItem(it) {
+  const f = it.fields || {};
+  return {
+    id: String(it.id), key: f.LeadId || "", leadId: f.LeadId || "", entityId: f.EntityId || "", client: f.ClientName || "",
+    adviser: f.AdviserName || "", owner: f.LeadOwner || "", category: f.Category || "", entityStatus: f.EntityStatus || "",
+    csa: f.CsaClient || "", leadName: f.LeadName || "", business: f.Business || (isNB(f.LeadName) ? "New business" : "Existing"),
+    due: spDate(f.DueDate), stage: f.CurrentStage || "", rev: num(f.ForecastRevenue), fua: num(f.ForecastFUA),
+    stageSince: f.StageSince || "", firstSeen: f.FirstSeenAt || "", lastModified: f.LastModifiedAt || "",
+    count: num(f.EventCount), sig: f.EventSig || "", events: null
+  };
+}
+const LEAD_COMPARE = [
+  ["client", "ClientName", "Client"], ["adviser", "AdviserName", "Adviser"], ["owner", "LeadOwner", "Lead owner"],
+  ["category", "Category", "Category"], ["entityStatus", "EntityStatus", "Entity status"], ["csa", "CsaClient", "CSA client"],
+  ["leadName", "LeadName", "Lead"], ["due", "DueDate", "Lead due"], ["stage", "CurrentStage", "Stage"],
+  ["rev", "ForecastRevenue", "Forecast revenue"], ["fua", "ForecastFUA", "Forecast FUA"]
+];
 
 /* =========================================================================
    Microsoft sign-in and Graph
@@ -733,7 +885,7 @@ const remote = {
   path: k => "/sites/" + sp.siteId + "/lists/" + sp.lists[k],
   async list(k) {
     if (!sp.lists[k]) return [];
-    const sel = k === "tasks" ? "($select=" + TASK_SELECT.join(",") + ")" : "";
+    const sel = SELECTS[k] ? "($select=" + SELECTS[k].join(",") + ")" : "";
     try { return await graphAll(this.path(k) + "/items?$expand=fields" + sel + "&$top=999"); }
     catch (e) { if (sel && e.status === 400) return graphAll(this.path(k) + "/items?$expand=fields&$top=999"); throw e; }
   },
@@ -754,13 +906,14 @@ const remote = {
     return graphAll(this.path("undo") + "/items?$expand=fields&$filter=fields/ImportId eq " + (+importId) + "&$top=999",
       { headers: { Prefer: "HonorNonIndexedQueriesWarningMayFailRandomly" } });
   },
-  async comments(ids, onProgress) {
-    const reqs = ids.map(id => ({ method: "GET", url: this.path("tasks") + "/items/" + id + "?$expand=fields($select=CommentsJson)" }));
+  async threads(k, ids, col, parse, onProgress) {
+    const reqs = ids.map(id => ({ method: "GET", url: this.path(k) + "/items/" + id + "?$expand=fields($select=" + col + ")" }));
     const res = await graphBatch(reqs, onProgress);
     const out = new Map();
-    res.forEach((r, i) => { if (r && r.status === 200) out.set(String(ids[i]), parseThread(r.body.fields && r.body.fields.CommentsJson)); });
+    res.forEach((r, i) => { if (r && r.status === 200) out.set(String(ids[i]), parse(r.body.fields && r.body.fields[col])); });
     return out;
-  }
+  },
+  comments(ids, onProgress) { return this.threads("tasks", ids, "CommentsJson", parseThread, onProgress); }
 };
 
 /* In-memory store for localhost testing. Nothing is persisted: a reload is a
@@ -768,6 +921,7 @@ const remote = {
 const local = {
   mem: {}, nextId: 1,
   async init() { for (const k of Object.keys(LISTS)) this.mem[k] = this.mem[k] || []; },
+  path: k => k,
   async list(k) { return this.mem[k].map(i => ({ id: i.id, fields: { ...i.fields } })); },
   async create(k, fields) { const it = { id: String(this.nextId++), fields: { ...fields } }; this.mem[k].push(it); return { id: it.id, fields: { ...fields } }; },
   async update(k, id, fields) { const it = this.mem[k].find(i => i.id === String(id)); if (!it) throw new Error("404 Item not found"); Object.assign(it.fields, fields); return it.fields; },
@@ -787,11 +941,12 @@ const local = {
     }
     return out;
   },
-  async comments(ids) {
+  async threads(k, ids, col, parse) {
     const out = new Map();
-    for (const id of ids) { const it = this.mem.tasks.find(i => i.id === String(id)); if (it) out.set(String(id), parseThread(it.fields.CommentsJson)); }
+    for (const id of ids) { const it = this.mem[k].find(i => i.id === String(id)); if (it) out.set(String(id), parse(it.fields[col])); }
     return out;
   },
+  comments(ids) { return this.threads("tasks", ids, "CommentsJson", parseThread); },
   async undoRows(importId) { return this.mem.undo.filter(i => +i.fields.ImportId === +importId).map(i => ({ id: i.id, fields: { ...i.fields } })); }
 };
 let db = local;
@@ -872,11 +1027,15 @@ const state = {
   tasks: [], advisers: [], support: [], managers: [], admins: [], settings: {}, settingIds: {}, imports: [],
   page: pref.get("page", "tasks"), tab: pref.get("tab", "Unactioned"),
   f: Object.assign({ q: "", adviser: "", region: "", assignee: "", mine: false, overdue: false, pastDue: false }, pref.get("filters", {})),
-  sort: null, pageNo: 0, setTab: "advisers", loaded: false
+  sort: null, pageNo: 0, setTab: "advisers", loaded: false,
+  leads: [], stages: [],
+  leadTab: pref.get("leadTab", ""), lsort: null, lpageNo: 0,
+  lf: Object.assign({ q: "", seg: "all", adviser: "", region: "", mine: false, stuck: false }, pref.get("leadFilters", {}))
 };
 /* Search and the card toggles are per visit — a forgotten "overdue only" would
    look like missing tasks next week. */
 Object.assign(state.f, { q: "", overdue: false, pastDue: false });
+Object.assign(state.lf, { q: "", stuck: false });
 
 function setting(key) {
   const def = KNOWN_SETTINGS.find(s => s.key === key);
@@ -885,8 +1044,11 @@ function setting(key) {
 }
 
 async function loadAll() {
-  const [t, a, s, m, ad, st, im] = await Promise.all(["tasks", "advisers", "support", "managers", "admins", "settings", "imports"].map(k => db.list(k)));
+  const [t, a, s, m, ad, st, im, ld, sg] = await Promise.all(["tasks", "advisers", "support", "managers", "admins", "settings", "imports", "leads", "stages"].map(k => db.list(k)));
   state.tasks = t.map(taskFromItem);
+  state.leads = ld.map(leadFromItem);
+  state.stages = sg.map(it => ({ id: String(it.id), name: it.fields.Title || "", order: num(it.fields.SortOrder),
+    hidden: it.fields.Hidden === true || it.fields.Hidden === "Yes" })).sort((x, y) => x.order - y.order || x.name.localeCompare(y.name));
   state.advisers = a.map(adviserFromItem).sort((x, y) => x.name.localeCompare(y.name));
   state.support = s.map(supportFromItem).sort((x, y) => x.name.localeCompare(y.name));
   state.managers = m.map(personFromItem).sort((x, y) => x.name.localeCompare(y.name));
@@ -942,6 +1104,13 @@ function daysOpen(t) {
   if (!end) return null;
   return Math.max(0, diffDays(t.activated, end));
 }
+/* Shown in whole weeks; under a week reads "<1". Sorting and the overdue
+   threshold still run on days, so nothing jumps a week at a time. */
+const fmtWeeks = d => d == null ? "—" : d < 7 ? "<1" : String(Math.floor(d / 7));
+/* An open task whose newest comment is more than a week old has gone quiet. */
+const STALE_COMMENT_DAYS = 7;
+const commentAge = t => t.latestAt ? diffDays(t.latestAt.slice(0, 10), todayISO()) : null;
+const isQuiet = t => isOpen(t) && commentAge(t) != null && commentAge(t) > STALE_COMMENT_DAYS;
 const isOverdue = t => isOpen(t) && (daysOpen(t) || 0) >= setting("OverdueDays");
 const isPastDue = t => isOpen(t) && t.due && t.due < todayISO();
 function daysClass(t) {
@@ -959,7 +1128,7 @@ function applyTheme(t) { document.documentElement.setAttribute("data-theme", t);
 function renderShell() {
   const r = state.role;
   const openCount = state.tasks.filter(isOpen).length;
-  const nav = [["tasks", "Tasks", ICON.tasks, openCount]];
+  const nav = [["tasks", "Implementation tasks", ICON.tasks, openCount], ["leads", "Lead stages", ICON.stages, state.leads.filter(isLeadShown).length]];
   if (r.admin) nav.push(["upload", "Upload report", ICON.upload], ["settings", "Settings", ICON.settings]);
   if (!nav.some(n => n[0] === state.page)) state.page = "tasks";
   $("#root").innerHTML =
@@ -984,6 +1153,7 @@ function renderShell() {
 function go(page) { state.page = page; pref.set("page", page); closeDrawer(); renderShell(); window.scrollTo(0, 0); }
 function renderPage() {
   if (state.page === "upload") renderUpload();
+  else if (state.page === "leads") renderLeads();
   else if (state.page === "settings") renderSettings();
   else renderTasks();
 }
@@ -1012,6 +1182,7 @@ function renderTasks() {
       '<select id="f-adviser"><option value="">All advisers</option>' + advOpts.map(o => opt(o[0], o[1], state.f.adviser)).join("") + "</select>" +
       '<select id="f-region"><option value="">All regions</option>' + REGIONS.concat(["Unassigned"]).map(r => opt(r, r, state.f.region)).join("") + "</select>" +
       '<select id="f-assignee"><option value="">Anyone assigned</option>' + asgOpts.map(o => opt(o[0], o[1], state.f.assignee)).join("") + "</select>" +
+      '<span class="chip" id="f-complete" title="Show the Complete tab">Show completed</span>' +
       '<button class="btn ghost sm" id="f-clear">Clear</button>' +
     "</div>" +
     '<div class="tabs" id="tabs"></div>' +
@@ -1022,6 +1193,7 @@ function renderTasks() {
   $("#f-region").onchange = e => { state.f.region = e.target.value; saveF(); };
   $("#f-assignee").onchange = e => { state.f.assignee = e.target.value; saveF(); };
   const mine = $("#f-mine"); if (mine) mine.onclick = () => { state.f.mine = !state.f.mine; mine.classList.toggle("on", state.f.mine); saveF(); };
+  $("#f-complete").onclick = () => { pref.set("showComplete", !pref.get("showComplete", false)); state.pageNo = 0; renderResults(); };
   $("#f-clear").onclick = () => { Object.assign(state.f, { q: "", adviser: "", region: "", assignee: "", mine: false, overdue: false, pastDue: false }); pref.set("filters", {}); renderTasks(); };
   $("#ref-btn").onclick = async () => { await refresh(); toast("Refreshed"); };
   $("#exp-btn").onclick = exportCsv;
@@ -1074,17 +1246,23 @@ function renderResults() {
     card("Open tasks", fmtN(openF.length), "Unactioned, pending or actioned", "var(--s1)") +
     card("Overdue", fmtN(openF.filter(isOverdue).length), lim + "+ days since activation · click to filter", "var(--bad-fg)", "c-overdue", state.f.overdue) +
     card("Past due date", fmtN(openF.filter(isPastDue).length), "Open beyond Xplan due date · click to filter", "var(--warn-fg)", "c-pastdue", state.f.pastDue) +
-    card("Average days open", fmtN(avg), "Across open tasks shown", "var(--peach)");
+    card("Average weeks open", fmtWeeks(avg), "Across open tasks shown", "var(--peach)");
   $("#c-overdue").onclick = () => { state.f.overdue = !state.f.overdue; state.pageNo = 0; pref.set("filters", { ...state.f, q: undefined }); renderResults(); };
   $("#c-pastdue").onclick = () => { state.f.pastDue = !state.f.pastDue; state.pageNo = 0; pref.set("filters", { ...state.f, q: undefined }); renderResults(); };
 
+  /* Complete is hidden unless asked for — it's the bulk of the report and
+     rarely needed. Hidden means gone from All too. */
+  const showComplete = pref.get("showComplete", false);
+  const tabs = showComplete ? TABS : TABS.filter(t => t !== "Complete");
+  const visible = showComplete ? base : base.filter(t => t.status !== "Complete");
   const counts = {}; TABS.forEach(t => counts[t] = 0);
-  base.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; counts.All++; });
-  if (!TABS.includes(state.tab)) state.tab = "Unactioned";
-  $("#tabs").innerHTML = TABS.map(t => '<button class="tab' + (state.tab === t ? " active" : "") + '" data-tab="' + t + '">' + t + '<span class="c">' + fmtN(counts[t]) + "</span></button>").join("");
+  visible.forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; counts.All++; });
+  if (!tabs.includes(state.tab)) state.tab = "Unactioned";
+  $("#tabs").innerHTML = tabs.map(t => '<button class="tab' + (state.tab === t ? " active" : "") + '" data-tab="' + t + '">' + t + '<span class="c">' + fmtN(counts[t]) + "</span></button>").join("");
   $$("#tabs .tab").forEach(b => b.onclick = () => { state.tab = b.dataset.tab; pref.set("tab", state.tab); state.sort = null; state.pageNo = 0; renderResults(); });
+  const sc = $("#f-complete"); if (sc) sc.classList.toggle("on", showComplete);
 
-  let rows = state.tab === "All" ? base : base.filter(t => t.status === state.tab);
+  let rows = state.tab === "All" ? visible : visible.filter(t => t.status === state.tab);
   const s = currentSort(), fn = SORTERS[s.key] || SORTERS.days;
   rows = rows.slice().sort((a, b) => { const x = fn(a), y = fn(b); return (x < y ? -1 : x > y ? 1 : 0) * s.dir || lc(a.client).localeCompare(lc(b.client)); });
   state.view = rows;
@@ -1093,7 +1271,7 @@ function renderResults() {
   const slice = rows.slice(state.pageNo * PAGE_SIZE, (state.pageNo + 1) * PAGE_SIZE);
   const closedTab = state.tab === "Complete" || state.tab === "Aborted";
   const cols = [["client", "Client"], ["adviser", "Adviser"], ["subject", "Task"], ["status", "Status"], ["assignee", "Assigned to"],
-    ["activated", "Activated"], closedTab ? ["complete", "Completed"] : ["due", "Due"], ["days", closedTab ? "Days taken" : "Days open"], ["latest", "Latest comment"]];
+    ["activated", "Activated"], closedTab ? ["complete", "Completed"] : ["due", "Due"], ["days", closedTab ? "Weeks taken" : "Weeks open"], ["latest", "Latest comment"]];
   if (!state.tasks.length) {
     $("#tbl").innerHTML = '<div class="empty"><div style="font-size:16px;font-weight:600;color:var(--ink);margin-bottom:6px">No tasks yet</div>' +
       (state.role.admin ? 'Load the Xplan report from <a href="#" id="go-up">Upload report</a> to get started.' : "An admin needs to load the first Xplan report.") + "</div>";
@@ -1114,8 +1292,10 @@ function renderResults() {
         '<td class="nowrap">' + esc(flipName(t.assignee)) + (isInactiveName(t.assignee) ? '<span class="tag">inactive</span>' : "") + "</td>" +
         '<td class="nowrap">' + fmtDate(t.activated) + "</td>" +
         '<td class="nowrap">' + dateCell + "</td>" +
-        '<td class="num"><span class="days ' + daysClass(t) + '">' + (d == null ? "—" : d) + "</span></td>" +
-        '<td class="cmt-cell">' + (t.latest ? '<div class="clamp">' + esc(t.latest) + '</div><div class="cell-sub">' + esc(fmtDateTime(t.latestAt)) + (t.count > 1 ? " · " + t.count + " comments" : "") + "</div>" : '<span class="muted">—</span>') + "</td>" +
+        '<td class="num"><span class="days ' + daysClass(t) + '" title="' + (d == null ? "" : plural(d, "day")) + '">' + fmtWeeks(d) + "</span></td>" +
+        '<td class="cmt-cell">' + (t.latest ? '<div class="clamp">' + esc(t.latest) + '</div><div class="cell-sub">' +
+          (isQuiet(t) ? '<span class="late" title="No new comment for ' + commentAge(t) + ' days">' + esc(fmtDateTime(t.latestAt)) + "</span>" : esc(fmtDateTime(t.latestAt))) +
+          (t.count > 1 ? " · " + t.count + " comments" : "") + "</div>" : '<span class="muted">—</span>') + "</td>" +
         "</tr>";
     }).join("") + "</tbody></table>";
   $("#pager").innerHTML = "<div>" + fmtN(state.pageNo * PAGE_SIZE + 1) + "–" + fmtN(Math.min(rows.length, (state.pageNo + 1) * PAGE_SIZE)) + " of " + fmtN(rows.length) + "</div>" +
@@ -1131,9 +1311,9 @@ function csvCell(v) {
 }
 function exportCsv() {
   const rows = state.view || [];
-  const head = ["Xplan ID", "Client", "Adviser", "Region", "Task", "Status", "Assigned to", "Activated", "Due", "Completed", "Days", "Latest comment", "Latest comment at"];
+  const head = ["Xplan ID", "Client", "Adviser", "Region", "Task", "Status", "Assigned to", "Activated", "Due", "Completed", "Weeks", "Latest comment", "Latest comment at"];
   const lines = [head.join(",")].concat(rows.map(t => [t.entityId, t.client, adviserLabel(t.adviser), regionOf(t), t.subject, t.status, flipName(t.assignee),
-    fmtDate(t.activated), fmtDate(t.due), fmtDate(t.complete), daysOpen(t) == null ? "" : daysOpen(t), t.latest, fmtDateTime(t.latestAt)].map(csvCell).join(",")));
+    fmtDate(t.activated), fmtDate(t.due), fmtDate(t.complete), daysOpen(t) == null ? "" : Math.floor(daysOpen(t) / 7), t.latest, fmtDateTime(t.latestAt)].map(csvCell).join(",")));
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
   a.download = "Wealth implementation tasks - " + state.tab + " - " + todayISO() + ".csv"; a.click();
@@ -1141,10 +1321,10 @@ function exportCsv() {
 }
 
 /* ---- drawer ---- */
-let drawerId = null;
+let drawerId = null, drawerKind = "tasks";
 async function openDrawer(id) {
   const t = state.tasks.find(x => x.id === id); if (!t) return;
-  drawerId = id; renderDrawer(t);
+  drawerId = id; drawerKind = "tasks"; renderDrawer(t);
   $("#drawer").classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#drawer-backdrop").classList.add("open");
   if (!t.comments) {
     try { const m = await db.comments([t.id]); t.comments = m.get(t.id) || []; }
@@ -1167,7 +1347,7 @@ function renderDrawer(t) {
     '<div class="dr-body"><p class="dr-subject">' + esc(t.subject) + "</p>" +
     '<div class="fields">' +
       fld("Status", '<span class="badge ' + statusClass(t.status) + '">' + esc(t.status) + "</span>") +
-      fld(isOpen(t) ? "Days open" : "Days taken", d == null ? "" : '<span class="days ' + daysClass(t) + '">' + d + "</span>" + (isOverdue(t) ? ' <span class="tag bad">overdue</span>' : "")) +
+      fld(isOpen(t) ? "Weeks open" : "Weeks taken", d == null ? "" : '<span class="days ' + daysClass(t) + '">' + fmtWeeks(d) + '</span> <span class="muted small">(' + plural(d, "day") + ")</span>" + (isOverdue(t) ? ' <span class="tag bad">overdue</span>' : "")) +
       fld("Adviser", esc(adviserLabel(t.adviser)) + (isInactiveName(t.adviser) ? '<span class="tag">inactive</span>' : "")) +
       fld("Region", esc(adv ? adv.region : "")) +
       fld("Adviser support", esc(sup.join(", "))) +
@@ -1188,9 +1368,270 @@ function spDateTime(v) {
 }
 
 /* =========================================================================
+   Lead stages page
+   ========================================================================= */
+function stageList() {
+  if (state.stages.length) return state.stages;
+  return DEFAULT_STAGES.map((n, i) => ({ id: null, name: n, order: i + 1, hidden: DEFAULT_HIDDEN_STAGES.includes(n) }));
+}
+function stageInfo(name) { return stageList().find(s => s.name === name) || null; }
+function isClosedStage(name) { return /^closed|not proceeding/i.test(String(name || "")); }
+function stageClass(name) { return /converted/i.test(name) ? "st-complete" : isClosedStage(name) ? "st-aborted" : /re-?engage/i.test(name) ? "st-pending" : "st-actioned"; }
+function isLeadShown(l) { const s = stageInfo(l.stage); return !(s && s.hidden); }
+function fmtMoney(v) { return "$" + Math.round(num(v)).toLocaleString("en-AU"); }
+function leadDaysInStage(l) { return l.stageSince ? Math.max(0, diffDays(l.stageSince.slice(0, 10), todayISO())) : null; }
+function leadDaysOpen(l) { return l.firstSeen ? Math.max(0, diffDays(l.firstSeen.slice(0, 10), todayISO())) : null; }
+function stageWeeksClass(l) {
+  if (isClosedStage(l.stage)) return "";
+  const d = leadDaysInStage(l); if (d == null) return "";
+  return d / 7 >= setting("StageRedWeeks") ? "red" : d / 7 >= setting("StageAmberWeeks") ? "amber" : "";
+}
+const isStuck = l => stageWeeksClass(l) === "red";
+const isNBLead = l => l.business === "New business";
+
+/* First leads upload saves the default order; later ones append any stage
+   Xplan adds. Returns how many new (non-default) stages were added. */
+async function ensureStages(extra) {
+  if (!LOCAL && !sp.lists.stages) return 0;
+  const have = new Set(state.stages.map(s => s.name));
+  let order = state.stages.reduce((m, s) => Math.max(m, s.order), 0);
+  const seed = state.stages.length ? [] : DEFAULT_STAGES;
+  const names = Array.from(new Set(seed.concat(extra || []))).filter(n => n && !have.has(n));
+  if (!names.length) return 0;
+  const res = await db.bulk(names.map(n => ({ kind: "create", list: "stages", fields: { Title: n, SortOrder: ++order, Hidden: DEFAULT_HIDDEN_STAGES.includes(n) } })));
+  if (res.some(r => !r.ok)) throw new Error("Couldn't save the stage list: " + res.find(r => !r.ok).error);
+  return names.filter(n => !DEFAULT_STAGES.includes(n)).length;
+}
+
+const LEAD_SEGS = [["all", "All"], ["nb", "New business"], ["ex", "Existing"]];
+function renderLeads() {
+  const lastImp = latestImportOf("leads");
+  const advOpts = Array.from(new Set(state.leads.map(l => nameKey(l.adviser)).filter(Boolean))).map(k => {
+    const l = state.leads.find(x => nameKey(x.adviser) === k); return [k, adviserLabel(l.adviser) + (isInactiveName(l.adviser) ? " (inactive)" : "")];
+  }).sort((a, b) => a[1].localeCompare(b[1]));
+  const opt = (v, l, cur) => '<option value="' + esc(v) + '"' + (v === cur ? " selected" : "") + ">" + esc(l) + "</option>";
+  const f = state.lf;
+  $("#page").innerHTML =
+    '<div class="page-head"><div><h1>Lead stages</h1><div class="sub">' +
+      (lastImp ? "Last report loaded " + esc(fmtDateTime(spDateTime(lastImp.ImportedAt))) + " by " + esc(lastImp.ImportedBy || "—") : "No leads report loaded yet") +
+      '</div></div><div style="display:flex;gap:8px"><button class="btn" id="exp-btn">' + ICON.download + 'Export CSV</button><button class="btn" id="ref-btn">' + ICON.refresh + "Refresh</button></div></div>" +
+    '<div class="cards" id="cards"></div>' +
+    '<div class="toolbar">' +
+      '<div class="seg-group">' + LEAD_SEGS.map(s => '<button class="seg' + (f.seg === s[0] ? " on" : "") + '" data-seg="' + s[0] + '">' + s[1] + "</button>").join("") + "</div>" +
+      '<div class="grow"><input type="search" id="f-q" placeholder="Search client, Xplan ID, lead or adviser…" value="' + esc(f.q) + '"></div>' +
+      (state.role.hasMine ? '<span class="chip' + (f.mine ? " on" : "") + '" id="f-mine">My leads</span>' : "") +
+      '<select id="f-adviser"><option value="">All advisers</option>' + advOpts.map(o => opt(o[0], o[1], f.adviser)).join("") + "</select>" +
+      '<select id="f-region"><option value="">All regions</option>' + REGIONS.concat(["Unassigned"]).map(r => opt(r, r, f.region)).join("") + "</select>" +
+      '<span class="chip" id="f-hidden" title="Show stages hidden in Settings → Lead stages">Show hidden stages</span>' +
+      '<button class="btn ghost sm" id="f-clear">Clear</button>' +
+    "</div>" +
+    '<div class="tabs" id="tabs"></div>' +
+    '<div class="panel"><div class="table-wrap" id="tbl"></div><div class="pager" id="pager"></div></div>';
+  const saveF = () => { const { q, stuck, ...rest } = state.lf; pref.set("leadFilters", rest); state.lpageNo = 0; renderLeadResults(); };
+  let qt; $("#f-q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { state.lf.q = e.target.value; saveF(); }, 150); };
+  $$("[data-seg]").forEach(b => b.onclick = () => { state.lf.seg = b.dataset.seg; $$("[data-seg]").forEach(x => x.classList.toggle("on", x === b)); saveF(); });
+  $("#f-adviser").onchange = e => { state.lf.adviser = e.target.value; saveF(); };
+  $("#f-region").onchange = e => { state.lf.region = e.target.value; saveF(); };
+  const mine = $("#f-mine"); if (mine) mine.onclick = () => { state.lf.mine = !state.lf.mine; mine.classList.toggle("on", state.lf.mine); saveF(); };
+  $("#f-hidden").onclick = () => { pref.set("showHiddenStages", !pref.get("showHiddenStages", false)); state.lpageNo = 0; renderLeadResults(); };
+  $("#f-clear").onclick = () => { Object.assign(state.lf, { q: "", seg: "all", adviser: "", region: "", mine: false, stuck: false }); pref.set("leadFilters", {}); renderLeads(); };
+  $("#ref-btn").onclick = async () => { await refresh(); toast("Refreshed"); };
+  $("#exp-btn").onclick = exportLeadsCsv;
+  $("#tbl").onclick = e => {
+    const th = e.target.closest("th[data-sort]");
+    if (th) { const k = th.dataset.sort; const cur = currentLeadSort(); state.lsort = { key: k, dir: cur.key === k ? -cur.dir : (["inStage", "open", "rev", "fua", "updated"].includes(k) ? -1 : 1) }; renderLeadResults(); return; }
+    const tr = e.target.closest("tr[data-id]"); if (tr) openLeadDrawer(tr.dataset.id);
+  };
+  renderLeadResults();
+}
+
+function leadBaseFiltered() {
+  const f = state.lf, q = lc(f.q).trim();
+  return state.leads.filter(l => {
+    if (f.seg === "nb" && !isNBLead(l)) return false;
+    if (f.seg === "ex" && isNBLead(l)) return false;
+    if (f.mine && !mineMatch(l)) return false;
+    if (f.adviser && nameKey(l.adviser) !== f.adviser) return false;
+    if (f.region) { const r = regionOf(l); if (f.region === "Unassigned" ? !!r : r !== f.region) return false; }
+    if (f.stuck && !isStuck(l)) return false;
+    if (q) {
+      const hay = lc(l.client + " " + l.entityId + " " + l.leadName + " " + adviserLabel(l.adviser) + " " + flipName(l.owner) + " " + l.category);
+      if (!q.split(/\s+/).every(w => hay.includes(w))) return false;
+    }
+    return true;
+  });
+}
+function currentLeadSort() { return state.lsort || { key: "inStage", dir: -1 }; }
+const LEAD_SORTERS = {
+  client: l => lc(l.client), adviser: l => lc(adviserLabel(l.adviser)), lead: l => lc(cleanLeadName(l.leadName)),
+  stage: l => { const i = stageList().findIndex(s => s.name === l.stage); return i < 0 ? 999 : i; },
+  inStage: l => leadDaysInStage(l) == null ? -1 : leadDaysInStage(l), open: l => leadDaysOpen(l) == null ? -1 : leadDaysOpen(l),
+  rev: l => isNBLead(l) ? l.rev : -1, fua: l => isNBLead(l) ? l.fua : -1, updated: l => l.lastModified || ""
+};
+
+function renderLeadResults() {
+  const showHidden = pref.get("showHiddenStages", false);
+  const hc = $("#f-hidden"); if (hc) hc.classList.toggle("on", showHidden);
+  const base = leadBaseFiltered();
+  const visible = showHidden ? base : base.filter(isLeadShown);
+  /* tabs: the stage list in its saved order, plus any stage Xplan has that the list doesn't yet */
+  const known = stageList().filter(s => showHidden || !s.hidden).map(s => s.name);
+  const extra = Array.from(new Set(visible.map(l => l.stage))).filter(s => s && !stageInfo(s));
+  const counts = {}; known.concat(extra, ["All"]).forEach(t => counts[t] = 0);
+  visible.forEach(l => { if (counts[l.stage] !== undefined) counts[l.stage]++; counts.All++; });
+  /* empty stages drop out of the bar so 16 stages don't mean 16 tabs */
+  const tabs = known.concat(extra).filter(t => counts[t] || t === state.leadTab).concat(["All"]);
+  if (!tabs.includes(state.leadTab)) state.leadTab = tabs.find(t => counts[t]) || "All";
+
+  const nb = visible.filter(isNBLead), ex = visible.filter(l => !isNBLead(l)), stuck = visible.filter(isStuck);
+  const card = (k, v, h, dot, id, on) => (id ? '<button class="card' + (on ? " on" : "") + '" id="' + id + '">' : '<div class="card">') +
+    '<div class="k"><span class="dot" style="background:' + dot + '"></span>' + k + '</div><div class="v">' + v + '</div><div class="h">' + h + "</div>" + (id ? "</button>" : "</div>");
+  $("#cards").innerHTML =
+    card("Leads", fmtN(visible.length), showHidden ? "Every stage" : "In the shown stages", "var(--s1)") +
+    card("New business", fmtN(nb.length), fmtMoney(nb.reduce((s, l) => s + l.rev, 0)) + " forecast revenue · " + fmtMoney(nb.reduce((s, l) => s + l.fua, 0)) + " FUA", "var(--peach)") +
+    card("Existing business", fmtN(ex.length), "Reviews, contacts and existing-client work", "var(--teal-fg)") +
+    card("Stuck", fmtN(stuck.length), setting("StageRedWeeks") + "+ weeks in one stage · click to filter", "var(--bad-fg)", "c-stuck", state.lf.stuck);
+  $("#c-stuck").onclick = () => { state.lf.stuck = !state.lf.stuck; state.lpageNo = 0; renderLeadResults(); };
+
+  $("#tabs").innerHTML = tabs.map(t => '<button class="tab' + (state.leadTab === t ? " active" : "") + '" data-tab="' + esc(t) + '">' + esc(t) +
+    (stageInfo(t) && stageInfo(t).hidden ? '<span class="tag">hidden</span>' : "") + '<span class="c">' + fmtN(counts[t]) + "</span></button>").join("");
+  $$("#tabs .tab").forEach(b => b.onclick = () => { state.leadTab = b.dataset.tab; pref.set("leadTab", state.leadTab); state.lpageNo = 0; renderLeadResults(); });
+
+  let rows = state.leadTab === "All" ? visible : visible.filter(l => l.stage === state.leadTab);
+  const s = currentLeadSort(), fn = LEAD_SORTERS[s.key] || LEAD_SORTERS.inStage;
+  rows = rows.slice().sort((a, b) => { const x = fn(a), y = fn(b); return (x < y ? -1 : x > y ? 1 : 0) * s.dir || lc(a.client).localeCompare(lc(b.client)); });
+  state.leadView = rows;
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  if (state.lpageNo >= pages) state.lpageNo = pages - 1;
+  const slice = rows.slice(state.lpageNo * PAGE_SIZE, (state.lpageNo + 1) * PAGE_SIZE);
+  const money = state.lf.seg !== "ex";
+  const cols = [["client", "Client"], ["adviser", "Adviser"], ["lead", "Lead"], ["stage", "Stage"], ["inStage", "Weeks in stage"], ["open", "Weeks open"]]
+    .concat(money ? [["rev", "Forecast revenue"], ["fua", "Forecast FUA"]] : [], [["updated", "Last update"]]);
+  const numCols = ["inStage", "open", "rev", "fua"];
+  if (!state.leads.length) {
+    $("#tbl").innerHTML = '<div class="empty"><div style="font-size:16px;font-weight:600;color:var(--ink);margin-bottom:6px">No leads yet</div>' +
+      (state.role.admin ? 'Load the Leads Stage History report from <a href="#" id="go-up">Upload report</a> to get started.' : "An admin needs to load the first leads report.") + "</div>";
+    const gu = $("#go-up"); if (gu) gu.onclick = e => { e.preventDefault(); go("upload"); };
+    $("#pager").innerHTML = ""; return;
+  }
+  if (!rows.length) { $("#tbl").innerHTML = '<div class="empty">No leads match these filters.</div>'; $("#pager").innerHTML = ""; return; }
+  $("#tbl").innerHTML = '<table class="tbl"><thead><tr>' + cols.map(c => '<th class="sortable' + (numCols.includes(c[0]) ? " num" : "") + '" data-sort="' + c[0] + '">' + c[1] +
+      (s.key === c[0] ? '<span class="arr">' + (s.dir > 0 ? "▲" : "▼") + "</span>" : "") + "</th>").join("") + "</tr></thead><tbody>" +
+    slice.map(l => {
+      const di = leadDaysInStage(l), dOpen = leadDaysOpen(l), nbl = isNBLead(l);
+      return '<tr data-id="' + esc(l.id) + '">' +
+        '<td class="client-cell"><div class="cell-main">' + esc(l.client) + '</div><div class="cell-sub">Xplan ' + esc(l.entityId) + (l.category ? " · " + esc(l.category) : "") + "</div></td>" +
+        '<td class="nowrap">' + esc(adviserLabel(l.adviser)) + (isInactiveName(l.adviser) ? '<span class="tag">inactive</span>' : "") + (regionOf(l) ? '<div class="cell-sub">' + esc(regionOf(l)) + "</div>" : "") + "</td>" +
+        '<td class="task-cell"><div class="clamp">' + esc(cleanLeadName(l.leadName)) + '</div><div class="cell-sub"><span class="tag ' + (nbl ? "nb" : "") + '" style="margin-left:0">' + (nbl ? "New business" : "Existing") + "</span></div></td>" +
+        '<td><span class="badge ' + stageClass(l.stage) + '">' + esc(l.stage || "—") + "</span></td>" +
+        '<td class="num"><span class="days ' + stageWeeksClass(l) + '" title="' + (di == null ? "" : plural(di, "day") + " since " + esc(fmtDate(l.stageSince))) + '">' + fmtWeeks(di) + "</span></td>" +
+        '<td class="num" title="' + (dOpen == null ? "" : plural(dOpen, "day")) + '">' + fmtWeeks(dOpen) + "</td>" +
+        (money ? '<td class="num">' + (nbl ? fmtMoney(l.rev) : '<span class="muted">—</span>') + '</td><td class="num">' + (nbl ? fmtMoney(l.fua) : '<span class="muted">—</span>') + "</td>" : "") +
+        '<td class="nowrap">' + esc(fmtDate(l.lastModified)) + "</td></tr>";
+    }).join("") + "</tbody></table>";
+  $("#pager").innerHTML = "<div>" + fmtN(state.lpageNo * PAGE_SIZE + 1) + "–" + fmtN(Math.min(rows.length, (state.lpageNo + 1) * PAGE_SIZE)) + " of " + fmtN(rows.length) + "</div>" +
+    '<div class="btns"><button class="btn sm" id="pg-prev"' + (state.lpageNo ? "" : " disabled") + '>Previous</button><span style="align-self:center">Page ' + (state.lpageNo + 1) + " of " + pages + '</span><button class="btn sm" id="pg-next"' + (state.lpageNo < pages - 1 ? "" : " disabled") + ">Next</button></div>";
+  $("#pg-prev").onclick = () => { state.lpageNo--; renderLeadResults(); };
+  $("#pg-next").onclick = () => { state.lpageNo++; renderLeadResults(); };
+}
+
+function exportLeadsCsv() {
+  const rows = state.leadView || [];
+  const head = ["Xplan ID", "Client", "Adviser", "Region", "Lead owner", "Lead", "Business", "Category", "Stage", "In stage since", "Weeks in stage", "Weeks open", "Forecast revenue", "Forecast FUA", "Lead due", "Last update"];
+  const lines = [head.join(",")].concat(rows.map(l => [l.entityId, l.client, adviserLabel(l.adviser), regionOf(l), flipName(l.owner), cleanLeadName(l.leadName), l.business, l.category, l.stage,
+    fmtDate(l.stageSince), leadDaysInStage(l) == null ? "" : Math.floor(leadDaysInStage(l) / 7), leadDaysOpen(l) == null ? "" : Math.floor(leadDaysOpen(l) / 7),
+    isNBLead(l) ? l.rev : "", isNBLead(l) ? l.fua : "", fmtDate(l.due), fmtDate(l.lastModified)].map(csvCell).join(",")));
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+  a.download = "Lead stages - " + state.leadTab + " - " + todayISO() + ".csv"; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/* ---- lead drawer: details + stage timeline ---- */
+async function openLeadDrawer(id) {
+  const l = state.leads.find(x => x.id === id); if (!l) return;
+  drawerId = id; drawerKind = "leads"; renderLeadDrawer(l);
+  $("#drawer").classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#drawer-backdrop").classList.add("open");
+  if (!l.events) {
+    try { const m = await db.threads("leads", [l.id], "EventsJson", parseEvents); l.events = m.get(l.id) || []; }
+    catch (e) { l.events = []; toast("Couldn't load the stage history: " + e.message, true); }
+    if (drawerId === id && drawerKind === "leads") renderLeadDrawer(l);
+  }
+}
+function renderLeadDrawer(l) {
+  const adv = adviserOf(l), di = leadDaysInStage(l), dOpen = leadDaysOpen(l), nbl = isNBLead(l);
+  const fld = (k, v) => '<div><div class="fk">' + k + '</div><div class="fv">' + (v || '<span class="muted">—</span>') + "</div></div>";
+  let timeline = '<div class="muted">Loading stage history…</div>', log = "";
+  if (l.events) {
+    const segs = stageSegments(l.events, l.stage), max = Math.max(1, ...segs.map(s => s.days));
+    timeline = !segs.length ? '<div class="muted">No stage history in the report.</div>' :
+      '<div class="tl">' + segs.map(s => '<div class="tl-row' + (s.current ? " cur" : "") + '"><div class="tl-top"><span class="badge ' + stageClass(s.stage) + '">' + esc(s.stage) + "</span>" +
+        (s.current ? '<span class="tag warn">current</span>' : "") + '<span class="tl-w"><strong>' + fmtWeeks(s.days) + "</strong> " + (s.days < 14 ? "week" : "weeks") + ' <span class="muted small">(' + plural(s.days, "day") + ")</span></span></div>" +
+        '<div class="tl-bar"><div style="width:' + Math.max(2, Math.round(100 * s.days / max)) + '%"></div></div>' +
+        '<div class="muted small">' + esc(fmtDate(s.start)) + " → " + (s.end ? esc(fmtDate(s.end)) : "now") + "</div></div>").join("") + "</div>";
+    log = '<details class="sect" style="margin-top:14px"><summary>Change log from Xplan (' + l.events.length + ")</summary><div class=\"inner\">" +
+      l.events.map(e => '<div class="adv-row"><span class="n small">' + esc(fmtDateTime(e.at)) + "</span><span class=\"small\">" +
+        (e.from && e.to && e.from !== e.to ? esc(e.from) + " → " + esc(e.to) : e.to ? (e.from ? "" : "Set to ") + esc(e.to) : "—") +
+        (e.rev || e.fua ? ' <span class="muted">· ' + fmtMoney(e.rev) + " / " + fmtMoney(e.fua) + " FUA</span>" : "") + "</span></div>").join("") + "</div></details>";
+  }
+  $("#drawer").innerHTML =
+    '<div class="dr-head"><div><h2>' + esc(l.client) + '</h2><div class="muted small">Xplan ID ' + esc(l.entityId) + " · Lead " + esc(l.leadId) + '</div></div><button class="btn ghost sm x" id="dr-x" aria-label="Close">' + ICON.x + "</button></div>" +
+    '<div class="dr-body"><p class="dr-subject">' + esc(cleanLeadName(l.leadName)) + ' <span class="tag ' + (nbl ? "nb" : "") + '">' + (nbl ? "New business" : "Existing") + "</span></p>" +
+    '<div class="fields">' +
+      fld("Stage", '<span class="badge ' + stageClass(l.stage) + '">' + esc(l.stage) + "</span>") +
+      fld("Weeks in stage", di == null ? "" : '<span class="days ' + stageWeeksClass(l) + '">' + fmtWeeks(di) + '</span> <span class="muted small">(since ' + esc(fmtDate(l.stageSince)) + ")</span>") +
+      fld("Adviser", esc(adviserLabel(l.adviser))) +
+      fld("Region", esc(adv ? adv.region : "")) +
+      fld("Lead owner", esc(flipName(l.owner))) +
+      fld("Category", esc(l.category)) +
+      fld("Entity status", esc(l.entityStatus)) +
+      fld("CSA client", esc(l.csa)) +
+      (nbl ? fld("Forecast revenue", fmtMoney(l.rev)) + fld("Forecast FUA", fmtMoney(l.fua)) : "") +
+      fld("Weeks open", dOpen == null ? "" : fmtWeeks(dOpen) + ' <span class="muted small">(since ' + esc(fmtDate(l.firstSeen)) + ")</span>") +
+      fld("Lead due", fmtDate(l.due)) +
+      fld("Last update", esc(fmtDateTime(l.lastModified))) +
+    "</div>" +
+    '<div class="thread-h"><span>Stage history</span><span class="muted small">From Xplan · read-only</span></div>' + timeline + log + "</div>";
+  $("#dr-x").onclick = closeDrawer;
+}
+
+/* =========================================================================
    Upload
    ========================================================================= */
-let upload = null;   // { file, report, plan, include: Map, addAdv: Map, phase }
+let upload = null;   // { file, report, plan, kind, include: Map, addAdv: Map, phase }
+
+/* The two reports share one upload → preview → confirm → undo pipeline. A kind
+   says which list, which fields to compare and how its "thread" (task comments
+   or lead history rows) is stored and merged. */
+const KINDS = {
+  tasks: {
+    key: "tasks", list: "tasks", page: "tasks", noun: "task", nouns: "tasks", Nouns: "Tasks", report: "Detailed Implementation Task Report",
+    items: () => state.tasks, compare: TASK_COMPARE, dateKeys: DATE_KEYS, statusKey: "status", statusLabel: "Status changes",
+    threadCol: "CommentsJson", parse: parseThread, threadKey: commentKey, sortThread: sortComments, threadProp: "comments",
+    threadFields: list => taskCommentFields(list), createFields: taskCreateFields, isLive: isOpen,
+    newThread: "New comments", withThread: "Tasks with new comments", subject: t => t.subject, badge: statusClass,
+    extra(f, x, side) {
+      const s = side === "prev" ? x.e : x.t;
+      if (x.changes.some(c => c.k === "assignee")) f.AssigneeDisplay = assigneeDisplay(s.assignee);
+      if (x.changes.some(c => c.k === "client" || c.k === "subject")) f.Title = (s.client + " — " + s.subject).slice(0, 255);
+    }
+  },
+  leads: {
+    key: "leads", list: "leads", page: "leads", noun: "lead", nouns: "leads", Nouns: "Leads", report: "Leads Stage History report",
+    items: () => state.leads, compare: LEAD_COMPARE, dateKeys: ["due"], statusKey: "stage", statusLabel: "Stage changes",
+    threadCol: "EventsJson", parse: parseEvents, threadKey: eventKey, sortThread: sortEvents, threadProp: "events",
+    threadFields: (list, stage) => leadEventFields(list, stage), createFields: leadCreateFields, isLive: l => !isClosedStage(l.stage),
+    newThread: "New history rows", withThread: "Leads with new history", subject: l => cleanLeadName(l.leadName), badge: stageClass,
+    extra(f, x, side) {
+      const s = side === "prev" ? x.e : x.t;
+      if (x.changes.some(c => c.k === "client" || c.k === "leadName")) f.Title = leadTitle(s);
+      if (x.changes.some(c => c.k === "leadName")) f.Business = isNB(s.leadName) ? "New business" : "Existing";
+    }
+  }
+};
+const kindOf = imp => KINDS[safeJson(imp.SummaryJson).kind] || KINDS.tasks;
+const dateColsOf = K => K.compare.filter(c => K.dateKeys.includes(c[0])).map(c => c[1]);
+const fieldVal = (K, c, v) => K.dateKeys.includes(c.k) ? toSpDate(v) : v;
 
 function renderUpload() {
   if (!state.role.admin) { $("#page").innerHTML = '<div class="empty">Only admins can upload reports.</div>'; return; }
@@ -1198,25 +1639,26 @@ function renderUpload() {
   let body = "";
   if (!u || u.phase === "pick") {
     body = '<label class="drop" id="drop"><input type="file" id="file-in" accept=".csv,text/csv" hidden>' + ICON.file +
-      '<h3>Drop the Xplan report here</h3><div class="muted">Detailed Implementation Task Report, exported as CSV · or click to choose</div></label>' +
+      '<h3>Drop an Xplan report here</h3><div class="muted">Detailed Implementation Task Report or Leads Stage History, exported as CSV · or click to choose</div></label>' +
       (u && u.error ? '<div class="banner bad" style="margin-top:14px">' + esc(u.error) + "</div>" : "") +
-      '<div class="panel panel-pad" style="margin-top:18px"><h3>How it works</h3><div class="muted">The report is read in your browser and compared with what the tracker already holds. ' +
-      "You'll see a preview of new tasks, status changes and new comments before anything is saved. Reports overlap week to week — tasks and comments already loaded are recognised and skipped.</div></div>";
+      '<div class="panel panel-pad" style="margin-top:18px"><h3>How it works</h3><div class="muted">The tracker works out which report it is from its columns, reads it in your browser and compares it with what it already holds. ' +
+      "You'll see a preview of what's new or changed before anything is saved. Reports overlap week to week — anything already loaded is recognised and skipped.</div></div>";
   } else if (u.phase === "busy") {
     body = '<div class="panel panel-pad"><h3>' + esc(u.label) + '</h3><div class="progress"><div style="width:' + (u.total ? Math.round(100 * u.done / u.total) : 5) + '%"></div></div><div class="muted small">' +
       (u.total ? fmtN(u.done) + " of " + fmtN(u.total) : "Working…") + "</div></div>";
   } else if (u.phase === "preview") {
     body = renderPreview(u);
   } else if (u.phase === "done") {
-    const r = u.result;
+    const r = u.result, K = KINDS[u.kind];
     body = '<div class="panel panel-pad"><h3>' + (r.failed ? "Update finished with errors" : "Tracker updated") + "</h3>" +
-      '<div class="sum-grid">' + sumBox("New tasks", r.created) + sumBox("Tasks updated", r.updated) + sumBox("Status changes", r.statusChanges) + sumBox("New comments", r.newComments) + (r.advisers ? sumBox("Advisers added", r.advisers) : "") + (r.failed ? sumBox("Failed", r.failed, true) : "") + "</div>" +
+      '<div class="sum-grid">' + sumBox("New " + K.nouns, r.created) + sumBox(K.Nouns + " updated", r.updated) + sumBox(K.statusLabel, r.statusChanges) + sumBox(K.newThread, r.newComments) +
+        (r.advisers ? sumBox("Advisers added", r.advisers) : "") + (r.stages ? sumBox("Stages added", r.stages) : "") + (r.failed ? sumBox("Failed", r.failed, true) : "") + "</div>" +
       (r.undoWarning ? '<div class="banner warn">' + esc(r.undoWarning) + "</div>" : "") +
       (r.failed ? '<div class="banner bad">' + esc(r.firstError || "") + " — run the same report again; anything already saved is recognised and skipped.</div>" : "") +
       (r.advisers ? '<div class="banner info">New advisers were added to the directory without an email or region. Fill those in under Settings → Advisers so the emails reach them.</div>' : "") +
-      '<div style="display:flex;gap:8px"><button class="btn primary" id="u-view">View tasks</button><button class="btn" id="u-again">Upload another</button></div></div>';
+      '<div style="display:flex;gap:8px"><button class="btn primary" id="u-view">View ' + K.nouns + '</button><button class="btn" id="u-again">Upload another</button></div></div>';
   }
-  $("#page").innerHTML = '<div class="page-head"><div><h1>Upload report</h1><div class="sub">Weekly Xplan Detailed Implementation Task Report</div></div></div>' + body;
+  $("#page").innerHTML = '<div class="page-head"><div><h1>Upload report</h1><div class="sub">Weekly Xplan reports — implementation tasks and lead stage history</div></div></div>' + body;
 
   if (!u || u.phase === "pick") {
     const drop = $("#drop"), inp = $("#file-in");
@@ -1225,7 +1667,7 @@ function renderUpload() {
     ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
     drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) startAnalyse(f); });
   } else if (u.phase === "preview") bindPreview(u);
-  else if (u.phase === "done") { $("#u-view").onclick = () => { upload = null; go("tasks"); }; $("#u-again").onclick = () => { upload = null; renderUpload(); }; }
+  else if (u.phase === "done") { $("#u-view").onclick = () => { const p = KINDS[u.kind].page; upload = null; go(p); }; $("#u-again").onclick = () => { upload = null; renderUpload(); }; }
 }
 const sumBox = (k, v, hl) => '<div class="sum' + (hl ? " hl" : "") + '"><div class="v">' + fmtN(v) + '</div><div class="k">' + k + "</div></div>";
 function setBusy(label, done, total) {
@@ -1243,12 +1685,16 @@ async function startAnalyse(file) {
     setBusy("Reading " + file.name);
     const text = await readFileText(file);
     await sleep(10);
-    const report = buildReport(text);
-    upload.report = report;
+    const report = parseReport(text);
+    upload.report = report; upload.kind = report.kind;
+    if (report.kind === "leads" && !LOCAL && (!sp.lists.leads || !sp.lists.stages))
+      throw new Error("This is a Leads Stage History report, but the WITLeads / WITStages lists don't exist yet. Settings → Lists → Create missing, then upload again.");
     await refresh(true);                         // compare against the latest, not what was loaded this morning
-    upload.plan = await analyse(report, (d, n) => setBusy("Checking existing comment threads", d, n));
+    upload.plan = await analyse(report, (d, n) => setBusy("Checking existing history", d, n));
     upload.include = new Map(upload.plan.inactiveAdvisers.map(a => [a.key, true]));
-    upload.addAdv = new Map(upload.plan.newAdvisers.map(a => [a.key, true]));
+    /* task advisers are offered ticked; lead advisers unticked — the leads
+       report covers far more advisers than wealth implementation does */
+    upload.addAdv = new Map(upload.plan.newAdvisers.map(a => [a.key, report.kind === "tasks"]));
     upload.phase = "preview";
   } catch (e) {
     console.error(e);
@@ -1257,12 +1703,14 @@ async function startAnalyse(file) {
   renderUpload();
 }
 
+const normVal = v => v == null ? "" : String(v);
 async function analyse(report, onProgress) {
-  const existing = new Map(state.tasks.map(t => [t.key, t]));
-  const plan = { creates: [], updates: [], unchanged: 0, notInReport: 0, newAdvisers: [], inactiveAdvisers: [] };
+  const K = KINDS[report.kind];
+  const existing = new Map(K.items().map(t => [t.key, t]));
+  const plan = { creates: [], updates: [], unchanged: 0, notInReport: 0, newAdvisers: [], inactiveAdvisers: [], newStages: [] };
   /* advisers in the report */
   const advs = new Map();
-  report.tasks.forEach(t => { const k = nameKey(t.adviser); if (!k) return; const a = advs.get(k) || { key: k, raw: t.adviser, tasks: 0, open: 0 }; a.tasks++; if (isOpen(t)) a.open++; if (isInactiveName(t.adviser)) a.raw = t.adviser; advs.set(k, a); });
+  report.items.forEach(t => { const k = nameKey(t.adviser); if (!k) return; const a = advs.get(k) || { key: k, raw: t.adviser, tasks: 0, open: 0 }; a.tasks++; if (K.isLive(t)) a.open++; if (isInactiveName(t.adviser)) a.raw = t.adviser; advs.set(k, a); });
   for (const a of advs.values()) {
     a.inactive = isInactiveName(a.raw);
     if (a.inactive) plan.inactiveAdvisers.push(a);
@@ -1270,38 +1718,43 @@ async function analyse(report, onProgress) {
   }
   plan.inactiveAdvisers.sort((x, y) => flipName(x.raw).localeCompare(flipName(y.raw)));
   plan.newAdvisers.sort((x, y) => x.inactive - y.inactive || flipName(x.raw).localeCompare(flipName(y.raw)));
+  if (report.stagesSeen) {
+    const have = new Set(stageList().map(s => s.name));
+    plan.newStages = Array.from(report.stagesSeen).filter(s => !have.has(s));
+  }
 
   /* threads to merge: only where the signature differs */
-  const need = report.tasks.map(t => existing.get(t.key)).filter((e, i) => e && e.sig !== report.tasks[i].sig);
-  const stored = need.length ? await db.comments(need.map(e => e.id), onProgress) : new Map();
+  const need = report.items.map(t => existing.get(t.key)).filter((e, i) => e && e.sig !== report.items[i].sig);
+  const stored = need.length ? await db.threads(K.list, need.map(e => e.id), K.threadCol, K.parse, onProgress) : new Map();
 
   const seen = new Set();
-  for (const t of report.tasks) {
+  for (const t of report.items) {
     const e = existing.get(t.key);
     if (!e) { plan.creates.push({ t }); continue; }
     seen.add(e.id);
     const changes = [];
-    for (const [k, col, label] of TASK_COMPARE) if ((t[k] || "") !== (e[k] || "")) changes.push({ k, col, label, from: e[k] || "", to: t[k] || "" });
+    for (const [k, col, label] of K.compare) if (normVal(t[k]) !== normVal(e[k])) changes.push({ k, col, label, from: e[k] == null ? "" : e[k], to: t[k] == null ? "" : t[k] });
     let merged = null, added = 0; const addedKeys = [];
     if (e.sig !== t.sig) {
       const old = stored.get(e.id) || [];
-      const m = new Map(old.map(c => [commentKey(c), c]));
-      for (const c of t.comments) { const k = commentKey(c); if (!m.has(k)) { m.set(k, c); added++; addedKeys.push(k); } }
-      if (added) merged = sortComments(Array.from(m.values()));
+      const m = new Map(old.map(c => [K.threadKey(c), c]));
+      for (const c of t[K.threadProp]) { const k = K.threadKey(c); if (!m.has(k)) { m.set(k, c); added++; addedKeys.push(k); } }
+      if (added) merged = K.sortThread(Array.from(m.values()));
     }
     if (!changes.length && !added) { plan.unchanged++; continue; }
     plan.updates.push({ e, t, changes, merged, added, addedKeys });
   }
-  plan.notInReport = state.tasks.filter(t => !seen.has(t.id)).length;
+  plan.notInReport = K.items().filter(t => !seen.has(t.id)).length;
   return plan;
 }
 
 function planTotals(u) {
+  const K = KINDS[u.kind];
   const inc = t => !isInactiveName(t.adviser) || u.include.get(nameKey(t.adviser)) !== false;
   const creates = u.plan.creates.filter(c => inc(c.t));
   const updates = u.plan.updates.filter(x => inc(x.t));
-  const status = updates.filter(x => x.changes.some(c => c.k === "status"));
-  const other = updates.filter(x => x.changes.some(c => c.k !== "status"));
+  const status = updates.filter(x => x.changes.some(c => c.k === K.statusKey));
+  const other = updates.filter(x => x.changes.some(c => c.k !== K.statusKey));
   const cmt = updates.filter(x => x.added);
   const skipped = (u.plan.creates.length - creates.length) + (u.plan.updates.length - updates.length);
   const advisers = u.plan.newAdvisers.filter(a => u.addAdv.get(a.key) && (!a.inactive || u.include.get(a.key) !== false));
@@ -1309,44 +1762,50 @@ function planTotals(u) {
 }
 
 function renderPreview(u) {
-  const p = u.plan, r = u.report, T = planTotals(u);
+  const p = u.plan, r = u.report, T = planTotals(u), K = KINDS[u.kind];
   const writes = T.creates.length + T.updates.length;
   const sectionTable = (rows, head, fn) => '<div class="table-wrap"><table class="tbl"><thead><tr>' + head.map(h => "<th>" + h + "</th>").join("") + "</tr></thead><tbody>" +
     rows.slice(0, 100).map(fn).join("") + "</tbody></table></div>" + (rows.length > 100 ? '<div class="muted small" style="padding:8px 2px">…and ' + fmtN(rows.length - 100) + " more</div>" : "");
+  const fmtChange = (c, v) => K.dateKeys.includes(c.k) ? fmtDate(v) : (c.k === "rev" || c.k === "fua") ? fmtMoney(v) : v;
+  const subj = t => '<td class="task-cell"><div class="clamp">' + esc(K.subject(t)) + "</div></td>";
   const warn = [];
   if (r.unknownStatuses.size) warn.push("Unrecognised status" + (r.unknownStatuses.size > 1 ? "es" : "") + ": " + Array.from(r.unknownStatuses.keys()).map(esc).join(", ") + ". These tasks load, but only show on the All tab.");
-  if (r.stats.skipped) warn.push(plural(r.stats.skipped, "row") + " had no client id or task subject and were skipped.");
+  if (r.stats.skipped) warn.push(plural(r.stats.skipped, "row") + " had no id and " + (r.stats.skipped === 1 ? "was" : "were") + " skipped.");
   if (r.stats.collisions) warn.push(plural(r.stats.collisions, "task") + " shared a client, task and activation date with another task — kept apart by due date.");
+  if (p.newStages.length) warn.push("New stage" + (p.newStages.length > 1 ? "s" : "") + " found: " + p.newStages.map(esc).join(", ") + ". " + (p.newStages.length > 1 ? "They'll be" : "It'll be") + " added to the end of the stage list — reorder in Settings → Lead stages.");
+  const statsLine = u.kind === "leads"
+    ? fmtN(r.stats.rows) + " rows → " + fmtN(r.items.length) + " leads · " + fmtN(r.items.filter(l => l.business === "New business").length) + " new business, " + fmtN(r.items.filter(l => l.business !== "New business").length) + " existing"
+    : fmtN(r.stats.rows) + " rows → " + fmtN(r.items.length) + " tasks · " + fmtN(r.stats.emptyComments) + " blank comment rows and " + fmtN(r.stats.dupComments) + " repeated comments ignored";
   return '<div class="panel panel-pad">' +
-    '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h3>' + esc(u.file.name) + '</h3><div class="muted small">' +
-      fmtN(r.stats.rows) + " rows → " + fmtN(r.tasks.length) + " tasks · " + fmtN(r.stats.emptyComments) + " blank comment rows and " + fmtN(r.stats.dupComments) + " repeated comments ignored</div></div>" +
-      '<div style="display:flex;gap:8px"><button class="btn" id="u-cancel">Cancel</button><button class="btn primary" id="u-go"' + (writes || T.advisers.length ? "" : " disabled") + ">" +
-      (writes ? "Confirm &amp; update " + plural(writes, "task") : T.advisers.length ? "Add advisers" : "Nothing to update") + "</button></div></div>" +
-    '<div class="sum-grid">' + sumBox("New tasks", T.creates.length, true) + sumBox("Status changes", T.status.length, true) + sumBox("New comments", T.newComments, true) +
-      sumBox("Tasks with new comments", T.cmt.length) + sumBox("Other field changes", T.other.length) + sumBox("Already up to date", p.unchanged) +
+    '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start"><div><h3>' + esc(u.file.name) + ' <span class="tag">' + esc(K.report) + '</span></h3><div class="muted small">' + statsLine + "</div></div>" +
+      '<div style="display:flex;gap:8px"><button class="btn" id="u-cancel">Cancel</button><button class="btn primary" id="u-go"' + (writes || T.advisers.length || p.newStages.length ? "" : " disabled") + ">" +
+      (writes ? "Confirm &amp; update " + plural(writes, K.noun) : T.advisers.length || p.newStages.length ? "Save" : "Nothing to update") + "</button></div></div>" +
+    '<div class="sum-grid">' + sumBox("New " + K.nouns, T.creates.length, true) + sumBox(K.statusLabel, T.status.length, true) + sumBox(K.newThread, T.newComments, true) +
+      sumBox(K.withThread, T.cmt.length) + sumBox("Other field changes", T.other.length) + sumBox("Already up to date", p.unchanged) +
       (T.skipped ? sumBox("Skipped (inactive advisers)", T.skipped) : "") + "</div>" +
     warn.map(w => '<div class="banner warn">' + w + "</div>").join("") +
     (p.inactiveAdvisers.length ? '<details class="sect" open><summary>Inactive advisers in this report <span class="tag warn">confirm</span></summary><div class="inner">' +
-      '<div class="muted small" style="margin-bottom:6px">These advisers are marked inactive in Xplan (the "zz" prefix). Tick to load their tasks into the tracker, untick to leave them out of this upload.</div>' +
+      '<div class="muted small" style="margin-bottom:6px">These advisers are marked inactive in Xplan (the "zz" prefix). Tick to load their ' + K.nouns + ' into the tracker, untick to leave them out of this upload.</div>' +
       p.inactiveAdvisers.map(a => '<label class="adv-row"><input type="checkbox" data-inc="' + esc(a.key) + '"' + (u.include.get(a.key) !== false ? " checked" : "") + '><span class="n">' + esc(flipName(a.raw)) +
-        '<span class="tag">inactive</span></span><span class="muted small">' + plural(a.tasks, "task") + " · " + a.open + " open</span></label>").join("") + "</div></details>" : "") +
-    (p.newAdvisers.length ? '<details class="sect" open><summary>Advisers not in the directory yet (' + p.newAdvisers.length + ")</summary><div class=\"inner\">" +
-      '<div class="muted small" style="margin-bottom:6px">Ticked advisers are added to Settings → Advisers. You\'ll need to add their email and region there before they get emails.</div>' +
+        '<span class="tag">inactive</span></span><span class="muted small">' + plural(a.tasks, K.noun) + " · " + a.open + " open</span></label>").join("") + "</div></details>" : "") +
+    (p.newAdvisers.length ? '<details class="sect"' + (u.kind === "tasks" ? " open" : "") + '><summary>Advisers not in the directory yet (' + p.newAdvisers.length + ")</summary><div class=\"inner\">" +
+      '<div class="muted small" style="margin-bottom:6px">Ticked advisers are added to Settings → Advisers (that gives them a region for the filters). ' +
+        (u.kind === "leads" ? "Their leads load either way." : "You'll need to add their email and region there before they get emails.") + "</div>" +
       p.newAdvisers.map(a => '<label class="adv-row"><input type="checkbox" data-add="' + esc(a.key) + '"' + (u.addAdv.get(a.key) ? " checked" : "") + '><span class="n">' + esc(flipName(a.raw)) +
-        (a.inactive ? '<span class="tag">inactive</span>' : "") + '</span><span class="muted small">' + plural(a.tasks, "task") + "</span></label>").join("") + "</div></details>" : "") +
-    (T.status.length ? '<details class="sect"><summary>Status changes (' + fmtN(T.status.length) + ")</summary><div class=\"inner\">" +
-      sectionTable(T.status, ["Client", "Task", "From", "To"], x => { const c = x.changes.find(c => c.k === "status");
-        return "<tr><td>" + esc(x.t.client) + '</td><td class="task-cell"><div class="clamp">' + esc(x.t.subject) + '</div></td><td><span class="badge ' + statusClass(c.from) + '">' + esc(c.from) + '</span></td><td><span class="badge ' + statusClass(c.to) + '">' + esc(c.to) + "</span></td></tr>"; }) + "</div></details>" : "") +
-    (T.creates.length ? '<details class="sect"><summary>New tasks (' + fmtN(T.creates.length) + ")</summary><div class=\"inner\">" +
-      sectionTable(T.creates, ["Client", "Adviser", "Task", "Status", "Activated"], c => "<tr><td>" + esc(c.t.client) + "</td><td>" + esc(flipName(c.t.adviser)) + '</td><td class="task-cell"><div class="clamp">' + esc(c.t.subject) +
-        '</div></td><td><span class="badge ' + statusClass(c.t.status) + '">' + esc(c.t.status) + "</span></td><td>" + fmtDate(c.t.activated) + "</td></tr>") + "</div></details>" : "") +
-    (T.cmt.length ? '<details class="sect"><summary>New comments (' + fmtN(T.newComments) + " on " + plural(T.cmt.length, "task") + ")</summary><div class=\"inner\">" +
-      sectionTable(T.cmt, ["Client", "Task", "New", "Latest comment"], x => "<tr><td>" + esc(x.t.client) + '</td><td class="task-cell"><div class="clamp">' + esc(x.t.subject) + '</div></td><td class="num">' + x.added +
+        (a.inactive ? '<span class="tag">inactive</span>' : "") + '</span><span class="muted small">' + plural(a.tasks, K.noun) + "</span></label>").join("") + "</div></details>" : "") +
+    (T.status.length ? '<details class="sect"><summary>' + K.statusLabel + " (" + fmtN(T.status.length) + ")</summary><div class=\"inner\">" +
+      sectionTable(T.status, ["Client", u.kind === "leads" ? "Lead" : "Task", "From", "To"], x => { const c = x.changes.find(c => c.k === K.statusKey);
+        return "<tr><td>" + esc(x.t.client) + "</td>" + subj(x.t) + '<td><span class="badge ' + K.badge(c.from) + '">' + esc(c.from) + '</span></td><td><span class="badge ' + K.badge(c.to) + '">' + esc(c.to) + "</span></td></tr>"; }) + "</div></details>" : "") +
+    (T.creates.length ? '<details class="sect"><summary>New ' + K.nouns + " (" + fmtN(T.creates.length) + ")</summary><div class=\"inner\">" +
+      sectionTable(T.creates, ["Client", "Adviser", u.kind === "leads" ? "Lead" : "Task", u.kind === "leads" ? "Stage" : "Status"], c => "<tr><td>" + esc(c.t.client) + "</td><td>" + esc(flipName(c.t.adviser)) + "</td>" + subj(c.t) +
+        '<td><span class="badge ' + K.badge(c.t[K.statusKey]) + '">' + esc(c.t[K.statusKey]) + "</span></td></tr>") + "</div></details>" : "") +
+    (T.cmt.length && u.kind === "tasks" ? '<details class="sect"><summary>New comments (' + fmtN(T.newComments) + " on " + plural(T.cmt.length, "task") + ")</summary><div class=\"inner\">" +
+      sectionTable(T.cmt, ["Client", "Task", "New", "Latest comment"], x => "<tr><td>" + esc(x.t.client) + "</td>" + subj(x.t) + '<td class="num">' + x.added +
         '</td><td class="cmt-cell"><div class="clamp">' + esc(x.merged[0] ? x.merged[0].text : "") + "</div></td></tr>") + "</div></details>" : "") +
     (T.other.length ? '<details class="sect"><summary>Other field changes (' + fmtN(T.other.length) + ")</summary><div class=\"inner\">" +
-      sectionTable(T.other, ["Client", "Task", "Change"], x => "<tr><td>" + esc(x.t.client) + '</td><td class="task-cell"><div class="clamp">' + esc(x.t.subject) + "</div></td><td>" +
-        x.changes.filter(c => c.k !== "status").map(c => "<div><strong>" + esc(c.label) + ":</strong> " + esc(DATE_KEYS.includes(c.k) ? fmtDate(c.from) : c.from) + " → " + esc(DATE_KEYS.includes(c.k) ? fmtDate(c.to) : c.to) + "</div>").join("") + "</td></tr>") + "</div></details>" : "") +
-    (p.notInReport ? '<div class="muted small" style="margin-top:10px">' + plural(p.notInReport, "task") + " already in the tracker " + (p.notInReport === 1 ? "isn't" : "aren't") + " in this report. They're left as they are.</div>" : "") +
+      sectionTable(T.other, ["Client", u.kind === "leads" ? "Lead" : "Task", "Change"], x => "<tr><td>" + esc(x.t.client) + "</td>" + subj(x.t) + "<td>" +
+        x.changes.filter(c => c.k !== K.statusKey).map(c => "<div><strong>" + esc(c.label) + ":</strong> " + esc(fmtChange(c, c.from)) + " → " + esc(fmtChange(c, c.to)) + "</div>").join("") + "</td></tr>") + "</div></details>" : "") +
+    (p.notInReport ? '<div class="muted small" style="margin-top:10px">' + plural(p.notInReport, K.noun) + " already in the tracker " + (p.notInReport === 1 ? "isn't" : "aren't") + " in this report. They're left as they are.</div>" : "") +
     "</div>";
 }
 function bindPreview(u) {
@@ -1357,18 +1816,17 @@ function bindPreview(u) {
 }
 
 async function applyPlan(u) {
-  const T = planTotals(u);
+  const K = KINDS[u.kind], T = planTotals(u);
   const ops = [];
-  T.creates.forEach(c => ops.push({ kind: "create", list: "tasks", fields: taskCreateFields(c.t), ref: c }));
+  T.creates.forEach(c => ops.push({ kind: "create", list: K.list, fields: K.createFields(c.t), ref: c }));
   T.updates.forEach(x => {
     const f = {};
-    x.changes.forEach(c => { f[c.col] = DATE_KEYS.includes(c.k) ? toSpDate(c.to) : c.to; });
-    if (x.changes.some(c => c.k === "assignee")) f.AssigneeDisplay = assigneeDisplay(x.t.assignee);
-    if (x.changes.some(c => c.k === "client" || c.k === "subject")) f.Title = (x.t.client + " — " + x.t.subject).slice(0, 255);
-    if (x.merged) Object.assign(f, taskCommentFields(x.merged));
-    ops.push({ kind: "update", list: "tasks", id: x.e.id, fields: f, ref: x });
+    x.changes.forEach(c => { f[c.col] = fieldVal(K, c, c.to); });
+    K.extra(f, x, "next");
+    if (x.merged) Object.assign(f, K.threadFields(x.merged, x.t.stage));
+    ops.push({ kind: "update", list: K.list, id: x.e.id, fields: f, ref: x });
   });
-  const summary = { created: 0, updated: 0, statusChanges: 0, newComments: 0, failed: 0, advisers: 0, firstError: "" };
+  const summary = { created: 0, updated: 0, statusChanges: 0, newComments: 0, failed: 0, advisers: 0, stages: 0, firstError: "" };
   try {
     if (T.advisers.length) {
       setBusy("Adding advisers", 0, T.advisers.length);
@@ -1377,25 +1835,25 @@ async function applyPlan(u) {
         summary.advisers++;
       }
     }
+    if (u.kind === "leads") summary.stages = await ensureStages(u.plan.newStages);
     setBusy("Saving to SharePoint", 0, ops.length);
     const res = ops.length ? await db.bulk(ops, (d, n) => setBusy("Saving to SharePoint", d, n)) : [];
     res.forEach((r, i) => {
       const o = ops[i];
       if (!r.ok) { summary.failed++; if (!summary.firstError) summary.firstError = r.error; return; }
       if (o.kind === "create") summary.created++;
-      else { summary.updated++; if (o.ref.changes.some(c => c.k === "status")) summary.statusChanges++; summary.newComments += o.ref.added; }
+      else { summary.updated++; if (o.ref.changes.some(c => c.k === K.statusKey)) summary.statusChanges++; summary.newComments += o.ref.added; }
     });
-    const statusList = T.status.slice(0, 200).map(x => { const c = x.changes.find(c => c.k === "status"); return [x.t.client, x.t.subject.slice(0, 120), c.from, c.to]; });
-    /* The undo record: ids this upload created, and for each task it changed,
-       the previous field values plus the comment keys it added. */
-    const undo = { v: 1, created: [], updated: [] };
+    const statusList = T.status.slice(0, 200).map(x => { const c = x.changes.find(c => c.k === K.statusKey); return [x.t.client, K.subject(x.t).slice(0, 120), c.from, c.to]; });
+    /* The undo record: ids this upload created, and for each row it changed,
+       the previous field values plus the thread keys it added. */
+    const undo = { v: 1, kind: u.kind, created: [], updated: [] };
     res.forEach((r, i) => {
       const o = ops[i]; if (!r.ok) return;
       if (o.kind === "create") { undo.created.push(+r.id); return; }
       const x = o.ref, prev = {};
       x.changes.forEach(c => prev[c.col] = c.from);
-      if (x.changes.some(c => c.k === "assignee")) prev.AssigneeDisplay = assigneeDisplay(x.e.assignee);
-      if (x.changes.some(c => c.k === "client" || c.k === "subject")) prev.Title = (x.e.client + " — " + x.e.subject).slice(0, 255);
+      K.extra(prev, x, "prev");
       undo.updated.push({ id: +x.e.id, prev, added: x.addedKeys || [] });
     });
     undo.created = toRanges(undo.created);
@@ -1403,9 +1861,9 @@ async function applyPlan(u) {
     for (let i = 0; i < undoText.length; i += THREAD_LIMIT) chunks.push(undoText.slice(i, i + THREAD_LIMIT));
     const log = await db.create("imports", {
       Title: u.file.name.slice(0, 255), FileName: u.file.name.slice(0, 255), ImportedBy: state.user.name || state.user.email,
-      ImportedAt: new Date().toISOString().replace(/\.\d+Z$/, "Z"), ReportRows: u.report.stats.rows, ReportTasks: u.report.tasks.length,
+      ImportedAt: new Date().toISOString().replace(/\.\d+Z$/, "Z"), ReportRows: u.report.stats.rows, ReportTasks: u.report.items.length,
       NewTasks: summary.created, StatusChanges: summary.statusChanges, NewComments: summary.newComments, OtherUpdates: T.other.length,
-      SummaryJson: JSON.stringify({ failed: summary.failed, skippedInactive: T.skipped, unchanged: u.plan.unchanged, advisersAdded: summary.advisers,
+      SummaryJson: JSON.stringify({ kind: u.kind, failed: summary.failed, skippedInactive: T.skipped, unchanged: u.plan.unchanged, advisersAdded: summary.advisers,
         updated: undo.updated.length, undoChunks: LOCAL || sp.lists.undo ? chunks.length : 0, statusChanges: statusList }).slice(0, THREAD_LIMIT)
     }).catch(e => { console.warn("import log", e); return null; });
     if (log && log.id && (LOCAL || sp.lists.undo)) {
@@ -1417,20 +1875,20 @@ async function applyPlan(u) {
     console.error(e); summary.failed = summary.failed || 1; summary.firstError = e.message;
   }
   await refresh(true);
-  upload = { phase: "done", result: summary };
+  upload = { phase: "done", kind: u.kind, result: summary };
   renderShell();
 }
 
 /* =========================================================================
    Settings
    ========================================================================= */
-const SET_TABS = [["advisers", "Advisers"], ["support", "Adviser support"], ["managers", "Regional managers"], ["admins", "Admins"], ["notify", "Notifications"], ["history", "Import history"], ["lists", "Lists"]];
+const SET_TABS = [["advisers", "Advisers"], ["support", "Adviser support"], ["managers", "Regional managers"], ["admins", "Admins"], ["notify", "Notifications"], ["stages", "Lead stages"], ["history", "Import history"], ["lists", "Lists"]];
 function renderSettings() {
   if (!state.role.admin) { $("#page").innerHTML = '<div class="empty">Only admins can change settings.</div>'; return; }
   $("#page").innerHTML = '<div class="page-head"><div><h1>Settings</h1><div class="sub">People, notifications and setup</div></div></div>' +
     '<div class="subtabs">' + SET_TABS.map(t => '<span class="chip' + (state.setTab === t[0] ? " on" : "") + '" data-st="' + t[0] + '">' + t[1] + "</span>").join("") + "</div><div id=\"set-body\"></div>";
   $$("[data-st]").forEach(c => c.onclick = () => { state.setTab = c.dataset.st; renderSettings(); });
-  ({ advisers: setAdvisers, support: setSupport, managers: setManagers, admins: setAdmins, notify: setNotify, history: setHistory, lists: setLists }[state.setTab] || setAdvisers)();
+  ({ advisers: setAdvisers, support: setSupport, managers: setManagers, admins: setAdmins, notify: setNotify, stages: setStages, history: setHistory, lists: setLists }[state.setTab] || setAdvisers)();
 }
 const tableOf = (head, rows, empty) => '<div class="panel"><div class="table-wrap">' + (rows.length ? '<table class="tbl"><thead><tr>' + head.map(h => "<th>" + h + "</th>").join("") + "</tr></thead><tbody>" + rows.join("") + "</tbody></table>" : '<div class="empty">' + empty + "</div>") + "</div></div>";
 const setHead = (title, sub, btn) => '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:12px"><div><h3 style="margin:0">' + title + '</h3><div class="muted small">' + sub + "</div></div>" + (btn || "") + "</div>";
@@ -1558,11 +2016,16 @@ async function recomputeRouting() {
 
 function setNotify() {
   $("#set-body").innerHTML = setHead("Notifications", "Emails are sent from the shared mailbox by Power Automate. These values are read by the flows each run.") +
-    '<div class="panel panel-pad">' + KNOWN_SETTINGS.map(s => '<div class="form-row" style="max-width:520px"><label>' + esc(s.label) + '</label><input type="number" min="0" step="1" data-set="' + s.key + '" value="' + esc(setting(s.key)) + '"><div class="hint">' + esc(s.desc) + "</div></div>").join("") +
-    '<button class="btn primary" id="set-save">Save</button></div>' +
+    settingsForm("notify") +
     '<div class="panel panel-pad" style="margin-top:14px"><h3>Schedule</h3><div class="kv" style="margin-top:8px">' +
-      '<div class="k">Weekly update</div><div>Monday 10:00am — each active adviser gets their open tasks (client, task, status, assigned to, days since activation, latest comment), with their support copied in.</div>' +
+      '<div class="k">Weekly update</div><div>Monday 10:00am — each active adviser gets their open tasks (client, task, status, assigned to, weeks open, latest comment), with their support copied in.</div>' +
       '<div class="k">Overdue notices</div><div>Checked daily. Open tasks at ' + setting("OverdueDays") + '+ days go to the adviser, their support and regional manager — one email per adviser, repeating every ' + (setting("ReminderDays") || "— (once only)") + (setting("ReminderDays") ? " days" : "") + ".</div></div></div>";
+  bindSettingsSave();
+}
+const settingsForm = group => '<div class="panel panel-pad">' + KNOWN_SETTINGS.filter(s => s.group === group).map(s => '<div class="form-row" style="max-width:520px"><label>' + esc(s.label) +
+  '</label><input type="number" min="0" step="1" data-set="' + s.key + '" value="' + esc(setting(s.key)) + '"><div class="hint">' + esc(s.desc) + "</div></div>").join("") +
+  '<button class="btn primary" id="set-save">Save</button></div>';
+function bindSettingsSave() {
   $("#set-save").onclick = async () => {
     try {
       for (const inp of $$("[data-set]")) {
@@ -1575,26 +2038,65 @@ function setNotify() {
     } catch (e) { toast("Couldn't save: " + e.message, true); }
   };
 }
-function setHistory() {
-  const rows = state.imports.slice(0, 100).map((i, n) => {
-    const canUndo = n === 0 && safeJson(i.SummaryJson).undoChunks > 0;
-    return "<tr><td>" + esc(fmtDateTime(spDateTime(i.ImportedAt))) + "</td><td>" + esc(i.ImportedBy) + '</td><td>' + esc(i.FileName) + '</td><td class="num">' + fmtN(i.ReportTasks) +
-      '</td><td class="num">' + fmtN(i.NewTasks) + '</td><td class="num">' + fmtN(i.StatusChanges) + '</td><td class="num">' + fmtN(i.NewComments) + "</td><td>" +
-      (n === 0 ? (canUndo ? '<button class="btn danger sm" data-undo="' + esc(i.id) + '">Delete</button>' : '<span class="muted small" title="Uploaded before undo records were kept">No undo record</span>')
-        : '<span class="muted small" title="Only the most recent upload can be deleted">—</span>') + "</td></tr>";
+
+/* Lead stages: order and visibility of the tabs, for everyone. */
+function setStages() {
+  const list = stageList(), counts = new Map();
+  state.leads.forEach(l => counts.set(l.stage, (counts.get(l.stage) || 0) + 1));
+  const seeded = state.stages.length > 0;
+  const rows = list.map((s, i) => '<tr><td class="nowrap"><button class="btn ghost sm" data-mv="' + i + '" data-d="-1"' + (i && seeded ? "" : " disabled") + ' title="Move up">▲</button>' +
+    '<button class="btn ghost sm" data-mv="' + i + '" data-d="1"' + (i < list.length - 1 && seeded ? "" : " disabled") + ' title="Move down">▼</button></td>' +
+    '<td><span class="badge ' + stageClass(s.name) + '">' + esc(s.name) + '</span></td><td class="num">' + fmtN(counts.get(s.name) || 0) + "</td>" +
+    '<td><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" data-hide="' + i + '"' + (s.hidden ? "" : " checked") + (seeded ? "" : " disabled") + "> " + (s.hidden ? "Hidden" : "Shown") + "</label></td></tr>");
+  $("#set-body").innerHTML = setHead("Lead stages", "The order of the stage tabs, and which ones show. Hidden stages stay in the data — \"Show hidden stages\" on the Lead stages page brings them back.",
+      seeded ? "" : '<button class="btn primary" id="seed-stages">Set up stage list</button>') +
+    (seeded ? "" : '<div class="banner info">This is the default order. It\'s saved to SharePoint by the first leads upload, or now with Set up stage list — after that it can be changed.</div>') +
+    tableOf(["Order", "Stage", "Leads now", "Tab"], rows, "") +
+    '<div style="margin-top:14px">' + settingsForm("stages") + "</div>";
+  bindSettingsSave();
+  const seed = $("#seed-stages");
+  if (seed) seed.onclick = async () => { try { await ensureStages([]); await refresh(true); renderSettings(); toast("Stage list saved"); } catch (e) { toast("Couldn't save: " + e.message, true); } };
+  $$("[data-mv]").forEach(b => b.onclick = () => moveStage(+b.dataset.mv, +b.dataset.d));
+  $$("[data-hide]").forEach(cb => cb.onchange = async () => {
+    const s = list[+cb.dataset.hide];
+    try { await db.update("stages", s.id, { Hidden: !cb.checked }); await refresh(true); renderSettings(); }
+    catch (e) { toast("Couldn't save: " + e.message, true); }
   });
-  $("#set-body").innerHTML = setHead("Import history", "Every confirmed upload. The most recent one can be deleted — that reverses everything it changed. Delete it and the one before becomes deletable, so you can step back several weeks.") +
-    '<div id="undo-busy"></div>' + tableOf(["When", "By", "File", "Tasks in report", "New", "Status changes", "New comments", ""], rows, "No uploads yet.");
+}
+async function moveStage(i, d) {
+  const list = state.stages.slice(), j = i + d;
+  if (j < 0 || j >= list.length) return;
+  [list[i], list[j]] = [list[j], list[i]];
+  /* renumber everything so duplicate or gappy orders typed in SharePoint heal themselves */
+  const ops = list.map((s, n) => ({ s, n: n + 1 })).filter(x => x.s.order !== x.n).map(x => ({ kind: "update", list: "stages", id: x.s.id, fields: { SortOrder: x.n } }));
+  try { const res = await db.bulk(ops); if (res.some(r => !r.ok)) throw new Error(res.find(r => !r.ok).error); await refresh(true); renderSettings(); }
+  catch (e) { toast("Couldn't reorder: " + e.message, true); }
+}
+/* Undo works per report type: the newest task upload and the newest leads
+   upload are each deletable, independently of each other. */
+const latestImportOf = kind => state.imports.find(i => kindOf(i).key === kind);
+function setHistory() {
+  const rows = state.imports.slice(0, 100).map(i => {
+    const K = kindOf(i), latest = latestImportOf(K.key) === i;
+    const canUndo = latest && safeJson(i.SummaryJson).undoChunks > 0;
+    return "<tr><td>" + esc(fmtDateTime(spDateTime(i.ImportedAt))) + '</td><td><span class="tag">' + (K.key === "leads" ? "Lead stages" : "Tasks") + "</span></td><td>" + esc(i.ImportedBy) + '</td><td>' + esc(i.FileName) + '</td><td class="num">' + fmtN(i.ReportTasks) +
+      '</td><td class="num">' + fmtN(i.NewTasks) + '</td><td class="num">' + fmtN(i.StatusChanges) + '</td><td class="num">' + fmtN(i.NewComments) + "</td><td>" +
+      (latest ? (canUndo ? '<button class="btn danger sm" data-undo="' + esc(i.id) + '">Delete</button>' : '<span class="muted small" title="Uploaded before undo records were kept">No undo record</span>')
+        : '<span class="muted small" title="Only the most recent upload of each report can be deleted">—</span>') + "</td></tr>";
+  });
+  $("#set-body").innerHTML = setHead("Import history", "Every confirmed upload. The most recent upload of each report can be deleted — that reverses everything it changed. Delete it and the one before becomes deletable, so you can step back several weeks.") +
+    '<div id="undo-busy"></div>' + tableOf(["When", "Report", "By", "File", "Rows → items", "New", "Status / stage changes", "New comments / history", ""], rows, "No uploads yet.");
   $$("[data-undo]").forEach(b => b.onclick = () => deleteImport(state.imports.find(i => i.id === b.dataset.undo)));
 }
 
-const DATE_COLS = TASK_COMPARE.filter(c => DATE_KEYS.includes(c[0])).map(c => c[1]);
 async function deleteImport(imp) {
-  if (!imp || state.imports[0] !== imp) { toast("Only the most recent upload can be deleted — delete the newer ones first.", true); return; }
+  const K = imp ? kindOf(imp) : null;
+  if (!imp || latestImportOf(K.key) !== imp) { toast("Only the most recent upload of each report can be deleted — delete the newer ones first.", true); return; }
   const sum = safeJson(imp.SummaryJson);
   const ok = await confirmDialog("Delete this upload?",
-    "This reverses <strong>" + esc(imp.FileName) + "</strong> from " + esc(fmtDateTime(spDateTime(imp.ImportedAt))) + ":<br>• removes the " + plural(num(imp.NewTasks), "new task") +
-    " it added<br>• puts the " + plural(num(sum.updated), "task") + " it changed back how they were (status, dates, assignee and the comments it added)<br><br>Advisers it added to the directory are kept. This can't be undone.",
+    "This reverses <strong>" + esc(imp.FileName) + "</strong> from " + esc(fmtDateTime(spDateTime(imp.ImportedAt))) + ":<br>• removes the " + plural(num(imp.NewTasks), "new " + K.noun) +
+    " it added<br>• puts the " + plural(num(sum.updated), K.noun) + " it changed back how they were (" + (K.key === "leads" ? "stage, details and the history rows it added" : "status, dates, assignee and the comments it added") +
+    ")<br><br>Advisers it added to the directory are kept. This can't be undone.",
     "Delete upload", true);
   if (!ok) return;
   const busy = (label, d, n) => { const el = $("#undo-busy"); if (el) el.innerHTML = '<div class="panel panel-pad" style="margin-bottom:12px"><h3>' + esc(label) + '</h3><div class="progress"><div style="width:' + (n ? Math.round(100 * d / n) : 5) + '%"></div></div><div class="muted small">' + (n ? fmtN(d) + " of " + fmtN(n) : "Working…") + "</div></div>"; };
@@ -1605,16 +2107,22 @@ async function deleteImport(imp) {
     if (!rows.length || (sum.undoChunks && rows.length !== sum.undoChunks)) throw new Error("The undo record for this upload is incomplete, so it can't be reversed safely.");
     const undo = JSON.parse(rows.map(r => r.fields.Json || "").join(""));
     const need = undo.updated.filter(x => x.added && x.added.length).map(x => String(x.id));
-    const threads = need.length ? await db.comments(need, (d, n) => busy("Reading comment threads", d, n)) : new Map();
-    const ops = fromRanges(undo.created).map(id => ({ kind: "delete", list: "tasks", id: String(id) }));
+    const threads = need.length ? await db.threads(K.list, need, K.threadCol, K.parse, (d, n) => busy("Reading history", d, n)) : new Map();
+    const dateCols = dateColsOf(K);
+    const ops = fromRanges(undo.created).map(id => ({ kind: "delete", list: K.list, id: String(id) }));
     for (const x of undo.updated) {
       const f = {};
-      for (const [col, v] of Object.entries(x.prev || {})) f[col] = DATE_COLS.includes(col) ? toSpDate(v) : v;
+      for (const [col, v] of Object.entries(x.prev || {})) f[col] = dateCols.includes(col) ? toSpDate(v) : v;
       if (x.added && x.added.length) {
         const th = threads.get(String(x.id));
-        if (th) { const drop = new Set(x.added); Object.assign(f, taskCommentFields(th.filter(c => !drop.has(commentKey(c))))); }
+        if (th) {
+          const drop = new Set(x.added);
+          const cur = K.items().find(i => i.id === String(x.id));
+          const stage = x.prev && x.prev.CurrentStage !== undefined ? x.prev.CurrentStage : cur && cur.stage;
+          Object.assign(f, K.threadFields(th.filter(c => !drop.has(K.threadKey(c))), stage));
+        }
       }
-      if (Object.keys(f).length) ops.push({ kind: "update", list: "tasks", id: String(x.id), fields: f });
+      if (Object.keys(f).length) ops.push({ kind: "update", list: K.list, id: String(x.id), fields: f });
     }
     busy("Reversing changes", 0, ops.length);
     const res = await db.bulk(ops, (d, n) => busy("Reversing changes", d, n));
@@ -1624,7 +2132,7 @@ async function deleteImport(imp) {
     busy("Removing the upload record");
     await db.bulk(rows.map(r => ({ kind: "delete", list: "undo", id: String(r.id) })).concat([{ kind: "delete", list: "imports", id: imp.id }]));
     await refresh(true); renderShell();
-    toast("Upload deleted — " + plural(fromRanges(undo.created).length, "task") + " removed, " + plural(undo.updated.length, "task") + " restored");
+    toast("Upload deleted — " + plural(fromRanges(undo.created).length, K.noun) + " removed, " + plural(undo.updated.length, K.noun) + " restored");
   } catch (e) {
     console.error(e);
     const el = $("#undo-busy"); if (el) el.innerHTML = '<div class="banner bad">' + esc(e.message) + "</div>";
@@ -1694,7 +2202,10 @@ async function refresh(quiet) {
   try { await loadAll(); }
   catch (e) { console.error(e); toast("Couldn't load from SharePoint: " + e.message, true); return; }
   if (quiet) return;
-  if (drawerId) { const t = state.tasks.find(x => x.id === drawerId); if (t) renderDrawer(t); else closeDrawer(); }
+  if (drawerId) {
+    const t = (drawerKind === "leads" ? state.leads : state.tasks).find(x => x.id === drawerId);
+    if (!t) closeDrawer(); else if (drawerKind === "leads") openLeadDrawer(t.id); else renderDrawer(t);
+  }
   renderShell();
 }
 function renderGate(msg, err) {
