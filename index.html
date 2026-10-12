@@ -375,6 +375,8 @@ const LISTS = {
     ["SupportEmails", "note"], ["ManagerEmails", "note"]] },
   support:  { title: "WITSupport",  cols: [["Email", "text"], ["Advisers", "note"]] },
   managers: { title: "WITManagers", cols: [["Email", "text"], ["Region", "text"]] },
+  /* The only people who can sign in. Advisers, support and managers are for
+     email routing and "My tasks" — being listed there doesn't grant access. */
   admins:   { title: "WITAdmins",   cols: [["Email", "text"]] },
   settings: { title: "WITSettings", cols: [["Value", "text"], ["Description", "text"]] },
   imports:  { title: "WITImportLog", cols: [
@@ -1043,21 +1045,30 @@ function setting(key) {
   return v === undefined || v === "" || !isFinite(+v) ? (def ? def.def : 0) : +v;
 }
 
+/* Access is decided from the people lists BEFORE any client data is fetched:
+   someone who isn't on the platform never has tasks or leads in their browser.
+   (The real lock is SharePoint's own permissions on the WIT lists — see
+   SETUP.md. This gate is what the app does on top.) */
 async function loadAll() {
-  const [t, a, s, m, ad, st, im, ld, sg] = await Promise.all(["tasks", "advisers", "support", "managers", "admins", "settings", "imports", "leads", "stages"].map(k => db.list(k)));
-  state.tasks = t.map(taskFromItem);
-  state.leads = ld.map(leadFromItem);
-  state.stages = sg.map(it => ({ id: String(it.id), name: it.fields.Title || "", order: num(it.fields.SortOrder),
-    hidden: it.fields.Hidden === true || it.fields.Hidden === "Yes" })).sort((x, y) => x.order - y.order || x.name.localeCompare(y.name));
+  const [a, s, m, ad, st] = await Promise.all(["advisers", "support", "managers", "admins", "settings"].map(k => db.list(k)));
   state.advisers = a.map(adviserFromItem).sort((x, y) => x.name.localeCompare(y.name));
   state.support = s.map(supportFromItem).sort((x, y) => x.name.localeCompare(y.name));
   state.managers = m.map(personFromItem).sort((x, y) => x.name.localeCompare(y.name));
   state.admins = ad.map(personFromItem).sort((x, y) => x.name.localeCompare(y.name));
   state.settings = {}; state.settingIds = {};
   st.forEach(it => { state.settings[it.fields.Title] = it.fields.Value; state.settingIds[it.fields.Title] = String(it.id); });
-  state.imports = im.map(it => ({ id: String(it.id), ...it.fields })).sort((x, y) => String(y.ImportedAt).localeCompare(String(x.ImportedAt)));
   indexDirectory();
   computeRole();
+  if (!state.role.allowed) {
+    Object.assign(state, { tasks: [], leads: [], stages: [], imports: [], loaded: false });
+    return;
+  }
+  const [t, im, ld, sg] = await Promise.all(["tasks", "imports", "leads", "stages"].map(k => db.list(k)));
+  state.tasks = t.map(taskFromItem);
+  state.leads = ld.map(leadFromItem);
+  state.stages = sg.map(it => ({ id: String(it.id), name: it.fields.Title || "", order: num(it.fields.SortOrder),
+    hidden: it.fields.Hidden === true || it.fields.Hidden === "Yes" })).sort((x, y) => x.order - y.order || x.name.localeCompare(y.name));
+  state.imports = im.map(it => ({ id: String(it.id), ...it.fields })).sort((x, y) => String(y.ImportedAt).localeCompare(String(x.ImportedAt)));
   state.loaded = true;
 }
 
@@ -1077,7 +1088,13 @@ function computeRole() {
   r.support = state.support.find(s => isMe(s.email)) || null;
   r.manager = state.managers.find(m => isMe(m.email)) || null;
   r.noAdmins = state.admins.length === 0;
-  r.admin = LOCAL || r.noAdmins || state.admins.some(a => isMe(a.email));
+  /* No "nobody's an admin yet, so everyone is" fallback any more: a list the
+     user can't read looks exactly like an empty one, and that must never
+     mean admin. The first admin is added in SharePoint directly. */
+  r.admin = LOCAL || state.admins.some(a => isMe(a.email));
+  /* Admins only. Anyone else signed in to Microsoft sees the "no access"
+     screen and no client data is fetched for them. */
+  r.allowed = r.admin;
   r.hasMine = !!(r.adviser || r.support || r.manager);
   if (!r.hasMine) state.f.mine = false;
   if (r.hasMine && pref.get("mineInit", false) === false) { state.f.mine = true; pref.set("mineInit", true); }
@@ -1085,8 +1102,8 @@ function computeRole() {
 function roleLabel() {
   const r = state.role, bits = [];
   if (r.admin) bits.push("Admin");
-  if (r.adviser) bits.push("Adviser"); if (r.support) bits.push("Support"); if (r.manager) bits.push("Manager (" + r.manager.region + ")");
-  return bits.join(" · ") || "Viewer";
+  if (r.adviser && r.adviser.active) bits.push("Adviser"); if (r.support) bits.push("Support"); if (r.manager) bits.push("Manager (" + r.manager.region + ")");
+  return bits.join(" · ");
 }
 function mineMatch(t) {
   const r = state.role; const k = nameKey(t.adviser);
@@ -1146,7 +1163,7 @@ function renderShell() {
   const b = [];
   if (LOCAL) b.push('<div class="banner warn"><strong>Local test mode.</strong> Data lives in this browser tab only — nothing is read from or written to SharePoint, and a reload starts empty.</div>');
   if (!LOCAL && sp.missingLists.length) b.push('<div class="banner bad"><strong>Setup needed.</strong> Missing list' + (sp.missingLists.length > 1 ? "s" : "") + ": " + sp.missingLists.map(k => esc(LISTS[k].title)).join(", ") + ". " + (r.admin ? 'Settings → Lists can create them.' : "Ask an admin to finish setup.") + "</div>");
-  if (!LOCAL && r.noAdmins && !sp.missingLists.includes("admins")) b.push('<div class="banner info"><strong>No admins set yet</strong>, so everyone can upload and change settings. Add the admins in Settings → Admins to lock that down.</div>');
+  if (!LOCAL && r.noAdmins && !sp.missingLists.includes("admins")) b.push('<div class="banner info"><strong>No admins are set up.</strong> Nobody can upload or change settings until one is added — add a row (Title = name, Email) to the WITAdmins list in SharePoint.</div>');
   $("#banners").innerHTML = b.join("");
   renderPage();
 }
@@ -1954,8 +1971,7 @@ function setManagers() {
 }
 function setAdmins() {
   const rows = state.admins.map(p => '<tr data-id="' + p.id + '"><td class="cell-main">' + esc(p.name) + "</td><td>" + esc(p.email) + "</td></tr>");
-  $("#set-body").innerHTML = setHead("Admins", "Admins can upload reports and change settings. Everyone else signed in can view.", '<button class="btn primary" id="add">Add admin</button>') +
-    (state.role.noAdmins ? '<div class="banner info">No admins yet — until one is added, everyone can reach this page. Add yourself first.</div>' : "") +
+  $("#set-body").innerHTML = setHead("Admins", "Only the people listed here can sign in to the tracker. Everyone else gets a \"no access\" screen — even if they can sign in to Microsoft or the SharePoint site.", '<button class="btn primary" id="add">Add admin</button>') +
     tableOf(["Name", "Email"], rows, "No admins yet.");
   $("#add").onclick = () => simplePersonModal("admins", null);
   $$("#set-body tr[data-id]").forEach(tr => tr.onclick = () => simplePersonModal("admins", state.admins.find(p => p.id === tr.dataset.id)));
@@ -1984,8 +2000,9 @@ async function savePerson(list, existing, fields, required) {
   }
   try {
     if (existing) await db.update(list, existing.id, fields); else await db.create(list, fields);
-    closeModal(); await refresh(true); await recomputeRouting();
-    if (!state.role.admin) { renderShell(); toast("Saved — you're no longer an admin on this list, so Settings has closed."); return; }
+    closeModal(); await refresh(true);
+    if (!state.role.allowed) return;                 // removed own access: refresh has shown the no-access screen
+    await recomputeRouting();
     if (list === "admins") renderShell();
     toast("Saved");
   } catch (e) { toast("Couldn't save: " + e.message, true); }
@@ -1993,10 +2010,14 @@ async function savePerson(list, existing, fields, required) {
 async function deletePerson(list, p) {
   if (list === "admins" && state.admins.length === 1 && !LOCAL) { toast("Keep at least one admin.", true); return; }
   if (list === "admins" && !LOCAL && isMe(p.email) && !state.admins.some(a => a !== p && isMe(a.email))) {
-    if (!await confirmDialog("Remove your own admin access?", "Once you're removed you'll lose Upload and Settings straight away — another admin would have to add you back.", "Remove me", true)) return;
+    if (!await confirmDialog("Remove your own admin access?", "Only admins can sign in, so you'll be locked out of the tracker straight away — another admin would have to add you back.", "Remove me", true)) return;
   }
   if (!await confirmDialog("Delete " + (p.name || "this entry") + "?", "This removes them from the directory. Tasks are not affected.", "Delete", true)) return;
-  try { await db.remove(list, p.id); closeModal(); await refresh(true); await recomputeRouting(); if (list === "admins" || !state.role.admin) renderShell(); toast("Deleted"); }
+  try {
+    await db.remove(list, p.id); closeModal(); await refresh(true);
+    if (!state.role.allowed) return;
+    await recomputeRouting(); if (list === "admins") renderShell(); toast("Deleted");
+  }
   catch (e) { toast("Couldn't delete: " + e.message, true); }
 }
 /* Power Automate reads who to email straight off each adviser row, so the
@@ -2201,6 +2222,7 @@ async function checkLists(create) {
 async function refresh(quiet) {
   try { await loadAll(); }
   catch (e) { console.error(e); toast("Couldn't load from SharePoint: " + e.message, true); return; }
+  if (!state.role.allowed) { closeDrawer(); renderDenied(); return; }
   if (quiet) return;
   if (drawerId) {
     const t = (drawerKind === "leads" ? state.leads : state.tasks).find(x => x.id === drawerId);
@@ -2213,6 +2235,13 @@ function renderGate(msg, err) {
     "<p>" + (msg || "Sign in with your Coastal Microsoft account to continue.") + "</p>" +
     '<button class="btn primary" id="signin">Sign in with Microsoft</button>' + (err ? '<div class="banner bad err">' + err + "</div>" : "") + "</div></div>";
   $("#signin").onclick = async () => { try { const app = await ensureMsal(); await app.loginRedirect({ scopes: SCOPES }); } catch (e) { renderGate(null, explainAuthError(e)); } };
+}
+function renderDenied() {
+  $("#root").innerHTML = '<div class="gate"><div class="gate-card"><img src="CAA_White.png" alt="Coastal Advisory"><h1>Wealth Implementation Tracker</h1>' +
+    "<p>You're signed in as <strong>" + esc(state.user.email) + "</strong>, but you haven't been given access to this platform.</p>" +
+    '<p class="small">If you need it, ask one of the tracker admins to add you.</p>' +
+    '<button class="btn" id="switch">Use a different account</button></div></div>';
+  $("#switch").onclick = async () => { const app = await ensureMsal(); app.logoutRedirect({ account: app.getActiveAccount() }); };
 }
 async function boot() {
   if (LOCAL) {
@@ -2239,6 +2268,7 @@ async function boot() {
     db = remote;
     await remote.init();
     await loadAll();
+    if (!state.role.allowed) { renderDenied(); return; }
     renderShell();
   } catch (e) {
     console.error(e);
