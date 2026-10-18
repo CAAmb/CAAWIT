@@ -353,9 +353,7 @@ const PAGE_SIZE = 50;
 /* Settings are ROWS in WITSettings (Title / Value / Description). */
 const KNOWN_SETTINGS = [
   { key: "OverdueDays", def: 30, group: "notify", label: "Overdue after (days)",
-    desc: "An open task this many days past its activation date is overdue. The adviser, their support and their regional manager are emailed." },
-  { key: "ReminderDays", def: 7, group: "notify", label: "Repeat reminder every (days)",
-    desc: "While a task stays open and overdue, the email repeats this often. 0 sends it once only." },
+    desc: "An open task this many days past its activation date is overdue — red in the tracker and flagged ⚠ Overdue in the Monday report. There are no separate overdue emails." },
   { key: "StageAmberWeeks", def: 4, group: "stages", label: "Amber after (weeks in a stage)",
     desc: "A lead this many weeks in its current stage shows amber." },
   { key: "StageRedWeeks", def: 8, group: "stages", label: "Red after (weeks in a stage)",
@@ -1372,7 +1370,6 @@ function renderDrawer(t) {
       fld("Activated", fmtDate(t.activated)) +
       fld("Due", t.due ? '<span class="' + (isPastDue(t) ? "late" : "") + '">' + fmtDate(t.due) + "</span>" : "") +
       fld("Completed", fmtDate(t.complete)) +
-      fld("Overdue emails", t.notifyCount ? plural(t.notifyCount, "sent") + " · last " + esc(fmtDateTime(spDateTime(t.lastNotified))) : "") +
     "</div>" +
     '<div class="thread-h"><span>Comments' + (t.comments ? " (" + t.comments.length + ")" : "") + '</span><span class="muted small">From Xplan · read-only</span></div>' + thread + "</div>";
   $("#dr-x").onclick = closeDrawer;
@@ -2039,8 +2036,9 @@ function setNotify() {
   $("#set-body").innerHTML = setHead("Notifications", "Emails are sent from the shared mailbox by Power Automate. These values are read by the flows each run.") +
     settingsForm("notify") +
     '<div class="panel panel-pad" style="margin-top:14px"><h3>Schedule</h3><div class="kv" style="margin-top:8px">' +
-      '<div class="k">Weekly update</div><div>Monday 10:00am — each active adviser gets their open tasks (client, task, status, assigned to, weeks open, latest comment), with their support copied in.</div>' +
-      '<div class="k">Overdue notices</div><div>Checked daily. Open tasks at ' + setting("OverdueDays") + '+ days go to the adviser, their support and regional manager — one email per adviser, repeating every ' + (setting("ReminderDays") || "— (once only)") + (setting("ReminderDays") ? " days" : "") + ".</div></div></div>";
+      '<div class="k">Weekly report</div><div>Monday 10:00am — each active adviser gets their open tasks, tasks completed in the last 7 days, open leads and leads converted in the last 7 days, with their support copied in.</div>' +
+      '<div class="k">Overdue</div><div>Open tasks at ' + setting("OverdueDays") + '+ days are flagged ⚠ Overdue in that report. No separate reminders.</div>' +
+      '<div class="k">Managers</div><div>Each regional manager gets a summary table of their region\'s advisers (All = every adviser).</div></div></div>';
   bindSettingsSave();
 }
 const settingsForm = group => '<div class="panel panel-pad">' + KNOWN_SETTINGS.filter(s => s.group === group).map(s => '<div class="form-row" style="max-width:520px"><label>' + esc(s.label) +
