@@ -365,7 +365,7 @@ const LISTS = {
   tasks: { title: "WITTasks", cols: [
     ["TaskKey", "text", true], ["EntityId", "text", true], ["ClientName", "text"], ["AdviserName", "text", true],
     ["Assignee", "text"], ["AssigneeDisplay", "text"], ["TaskSubject", "note"], ["Status", "text", true], ["ActivatedDate", "date", true],
-    ["DueDate", "date"], ["CompleteDate", "date"], ["LatestComment", "note"], ["LatestCommentAt", "text"],
+    ["DueDate", "date"], ["CompleteDate", "date", true], ["LatestComment", "note"], ["LatestCommentAt", "text"],
     ["CommentCount", "number"], ["CommentSig", "text"], ["CommentsJson", "note"],
     ["LastNotifiedAt", "datetime"], ["NotifyCount", "number"]] },
   advisers: { title: "WITAdvisers", cols: [
@@ -392,7 +392,7 @@ const LISTS = {
     ["ForecastFUA", "number"], ["StageSince", "text"], ["FirstSeenAt", "text"], ["LastModifiedAt", "text"],
     ["EventCount", "number"], ["EventSig", "text"], ["EventsJson", "note"]] },
   /* Lead stages: order and visibility for the tabs, shared by everyone. */
-  stages: { title: "WITStages", cols: [["SortOrder", "number"], ["Hidden", "bool"]] }
+  stages: { title: "WITStages", cols: [["SortOrder", "number"], ["Hidden", "bool"], ["Nickname", "text"]] }
 };
 /* Everything but the thread is loaded up front; threads are fetched when a
    row is opened or an import needs to merge one. */
@@ -1065,7 +1065,7 @@ async function loadAll() {
   state.tasks = t.map(taskFromItem);
   state.leads = ld.map(leadFromItem);
   state.stages = sg.map(it => ({ id: String(it.id), name: it.fields.Title || "", order: num(it.fields.SortOrder),
-    hidden: it.fields.Hidden === true || it.fields.Hidden === "Yes" })).sort((x, y) => x.order - y.order || x.name.localeCompare(y.name));
+    hidden: it.fields.Hidden === true || it.fields.Hidden === "Yes", nickname: String(it.fields.Nickname || "").trim() })).sort((x, y) => x.order - y.order || x.name.localeCompare(y.name));
   state.imports = im.map(it => ({ id: String(it.id), ...it.fields })).sort((x, y) => String(y.ImportedAt).localeCompare(String(x.ImportedAt)));
   state.loaded = true;
 }
@@ -1389,6 +1389,10 @@ function stageList() {
   return DEFAULT_STAGES.map((n, i) => ({ id: null, name: n, order: i + 1, hidden: DEFAULT_HIDDEN_STAGES.includes(n) }));
 }
 function stageInfo(name) { return stageList().find(s => s.name === name) || null; }
+/* Display only. Everything stored, matched and emailed uses the Xplan name;
+   a nickname just changes what the platform shows. */
+function stageLabel(name) { const s = stageInfo(name); return s && s.nickname ? s.nickname : (name || ""); }
+const stageBadge = name => '<span class="badge ' + stageClass(name) + '"' + (stageLabel(name) !== name ? ' title="Xplan: ' + esc(name) + '"' : "") + ">" + esc(stageLabel(name) || "—") + "</span>";
 function isClosedStage(name) { return /^closed|not proceeding/i.test(String(name || "")); }
 function stageClass(name) { return /converted/i.test(name) ? "st-complete" : isClosedStage(name) ? "st-aborted" : /re-?engage/i.test(name) ? "st-pending" : "st-actioned"; }
 function isLeadShown(l) { const s = stageInfo(l.stage); return !(s && s.hidden); }
@@ -1507,7 +1511,7 @@ function renderLeadResults() {
     card("Stuck", fmtN(stuck.length), setting("StageRedWeeks") + "+ weeks in one stage · click to filter", "var(--bad-fg)", "c-stuck", state.lf.stuck);
   $("#c-stuck").onclick = () => { state.lf.stuck = !state.lf.stuck; state.lpageNo = 0; renderLeadResults(); };
 
-  $("#tabs").innerHTML = tabs.map(t => '<button class="tab' + (state.leadTab === t ? " active" : "") + '" data-tab="' + esc(t) + '">' + esc(t) +
+  $("#tabs").innerHTML = tabs.map(t => '<button class="tab' + (state.leadTab === t ? " active" : "") + '" data-tab="' + esc(t) + '"' + (t !== "All" && stageLabel(t) !== t ? ' title="Xplan: ' + esc(t) + '"' : "") + ">" + esc(t === "All" ? t : stageLabel(t)) +
     (stageInfo(t) && stageInfo(t).hidden ? '<span class="tag">hidden</span>' : "") + '<span class="c">' + fmtN(counts[t]) + "</span></button>").join("");
   $$("#tabs .tab").forEach(b => b.onclick = () => { state.leadTab = b.dataset.tab; pref.set("leadTab", state.leadTab); state.lpageNo = 0; renderLeadResults(); });
 
@@ -1537,7 +1541,7 @@ function renderLeadResults() {
         '<td class="client-cell"><div class="cell-main">' + esc(l.client) + '</div><div class="cell-sub">Xplan ' + esc(l.entityId) + (l.category ? " · " + esc(l.category) : "") + "</div></td>" +
         '<td class="nowrap">' + esc(adviserLabel(l.adviser)) + (isInactiveName(l.adviser) ? '<span class="tag">inactive</span>' : "") + (regionOf(l) ? '<div class="cell-sub">' + esc(regionOf(l)) + "</div>" : "") + "</td>" +
         '<td class="task-cell"><div class="clamp">' + esc(cleanLeadName(l.leadName)) + '</div><div class="cell-sub"><span class="tag ' + (nbl ? "nb" : "") + '" style="margin-left:0">' + (nbl ? "New business" : "Existing") + "</span></div></td>" +
-        '<td><span class="badge ' + stageClass(l.stage) + '">' + esc(l.stage || "—") + "</span></td>" +
+        "<td>" + stageBadge(l.stage) + "</td>" +
         '<td class="num"><span class="days ' + stageWeeksClass(l) + '" title="' + (di == null ? "" : plural(di, "day") + " since " + esc(fmtDate(l.stageSince))) + '">' + fmtWeeks(di) + "</span></td>" +
         '<td class="num" title="' + (dOpen == null ? "" : plural(dOpen, "day")) + '">' + fmtWeeks(dOpen) + "</td>" +
         (money ? '<td class="num">' + (nbl ? fmtMoney(l.rev) : '<span class="muted">—</span>') + '</td><td class="num">' + (nbl ? fmtMoney(l.fua) : '<span class="muted">—</span>') + "</td>" : "") +
@@ -1551,8 +1555,8 @@ function renderLeadResults() {
 
 function exportLeadsCsv() {
   const rows = state.leadView || [];
-  const head = ["Xplan ID", "Client", "Adviser", "Region", "Lead owner", "Lead", "Business", "Category", "Stage", "In stage since", "Weeks in stage", "Weeks open", "Forecast revenue", "Forecast FUA", "Lead due", "Last update"];
-  const lines = [head.join(",")].concat(rows.map(l => [l.entityId, l.client, adviserLabel(l.adviser), regionOf(l), flipName(l.owner), cleanLeadName(l.leadName), l.business, l.category, l.stage,
+  const head = ["Xplan ID", "Client", "Adviser", "Region", "Lead owner", "Lead", "Business", "Category", "Stage", "Xplan stage", "In stage since", "Weeks in stage", "Weeks open", "Forecast revenue", "Forecast FUA", "Lead due", "Last update"];
+  const lines = [head.join(",")].concat(rows.map(l => [l.entityId, l.client, adviserLabel(l.adviser), regionOf(l), flipName(l.owner), cleanLeadName(l.leadName), l.business, l.category, stageLabel(l.stage), l.stage,
     fmtDate(l.stageSince), leadDaysInStage(l) == null ? "" : Math.floor(leadDaysInStage(l) / 7), leadDaysOpen(l) == null ? "" : Math.floor(leadDaysOpen(l) / 7),
     isNBLead(l) ? l.rev : "", isNBLead(l) ? l.fua : "", fmtDate(l.due), fmtDate(l.lastModified)].map(csvCell).join(",")));
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv" });
@@ -1579,20 +1583,20 @@ function renderLeadDrawer(l) {
   if (l.events) {
     const segs = stageSegments(l.events, l.stage), max = Math.max(1, ...segs.map(s => s.days));
     timeline = !segs.length ? '<div class="muted">No stage history in the report.</div>' :
-      '<div class="tl">' + segs.map(s => '<div class="tl-row' + (s.current ? " cur" : "") + '"><div class="tl-top"><span class="badge ' + stageClass(s.stage) + '">' + esc(s.stage) + "</span>" +
+      '<div class="tl">' + segs.map(s => '<div class="tl-row' + (s.current ? " cur" : "") + '"><div class="tl-top">' + stageBadge(s.stage) +
         (s.current ? '<span class="tag warn">current</span>' : "") + '<span class="tl-w"><strong>' + fmtWeeks(s.days) + "</strong> " + (s.days < 14 ? "week" : "weeks") + ' <span class="muted small">(' + plural(s.days, "day") + ")</span></span></div>" +
         '<div class="tl-bar"><div style="width:' + Math.max(2, Math.round(100 * s.days / max)) + '%"></div></div>' +
         '<div class="muted small">' + esc(fmtDate(s.start)) + " → " + (s.end ? esc(fmtDate(s.end)) : "now") + "</div></div>").join("") + "</div>";
     log = '<details class="sect" style="margin-top:14px"><summary>Change log from Xplan (' + l.events.length + ")</summary><div class=\"inner\">" +
       l.events.map(e => '<div class="adv-row"><span class="n small">' + esc(fmtDateTime(e.at)) + "</span><span class=\"small\">" +
-        (e.from && e.to && e.from !== e.to ? esc(e.from) + " → " + esc(e.to) : e.to ? (e.from ? "" : "Set to ") + esc(e.to) : "—") +
+        (e.from && e.to && e.from !== e.to ? esc(stageLabel(e.from)) + " → " + esc(stageLabel(e.to)) : e.to ? (e.from ? "" : "Set to ") + esc(stageLabel(e.to)) : "—") +
         (e.rev || e.fua ? ' <span class="muted">· ' + fmtMoney(e.rev) + " / " + fmtMoney(e.fua) + " FUA</span>" : "") + "</span></div>").join("") + "</div></details>";
   }
   $("#drawer").innerHTML =
     '<div class="dr-head"><div><h2>' + esc(l.client) + '</h2><div class="muted small">Xplan ID ' + esc(l.entityId) + " · Lead " + esc(l.leadId) + '</div></div><button class="btn ghost sm x" id="dr-x" aria-label="Close">' + ICON.x + "</button></div>" +
     '<div class="dr-body"><p class="dr-subject">' + esc(cleanLeadName(l.leadName)) + ' <span class="tag ' + (nbl ? "nb" : "") + '">' + (nbl ? "New business" : "Existing") + "</span></p>" +
     '<div class="fields">' +
-      fld("Stage", '<span class="badge ' + stageClass(l.stage) + '">' + esc(l.stage) + "</span>") +
+      fld("Stage", stageBadge(l.stage) + (stageLabel(l.stage) !== l.stage ? ' <span class="muted small">Xplan: ' + esc(l.stage) + "</span>" : "")) +
       fld("Weeks in stage", di == null ? "" : '<span class="days ' + stageWeeksClass(l) + '">' + fmtWeeks(di) + '</span> <span class="muted small">(since ' + esc(fmtDate(l.stageSince)) + ")</span>") +
       fld("Adviser", esc(adviserLabel(l.adviser))) +
       fld("Region", esc(adv ? adv.region : "")) +
@@ -1623,7 +1627,7 @@ const KINDS = {
     items: () => state.tasks, compare: TASK_COMPARE, dateKeys: DATE_KEYS, statusKey: "status", statusLabel: "Status changes",
     threadCol: "CommentsJson", parse: parseThread, threadKey: commentKey, sortThread: sortComments, threadProp: "comments",
     threadFields: list => taskCommentFields(list), createFields: taskCreateFields, isLive: isOpen,
-    newThread: "New comments", withThread: "Tasks with new comments", subject: t => t.subject, badge: statusClass,
+    newThread: "New comments", withThread: "Tasks with new comments", subject: t => t.subject, badge: statusClass, label: s => s,
     extra(f, x, side) {
       const s = side === "prev" ? x.e : x.t;
       if (x.changes.some(c => c.k === "assignee")) f.AssigneeDisplay = assigneeDisplay(s.assignee);
@@ -1635,7 +1639,7 @@ const KINDS = {
     items: () => state.leads, compare: LEAD_COMPARE, dateKeys: ["due"], statusKey: "stage", statusLabel: "Stage changes",
     threadCol: "EventsJson", parse: parseEvents, threadKey: eventKey, sortThread: sortEvents, threadProp: "events",
     threadFields: (list, stage) => leadEventFields(list, stage), createFields: leadCreateFields, isLive: l => !isClosedStage(l.stage),
-    newThread: "New history rows", withThread: "Leads with new history", subject: l => cleanLeadName(l.leadName), badge: stageClass,
+    newThread: "New history rows", withThread: "Leads with new history", subject: l => cleanLeadName(l.leadName), badge: stageClass, label: s => stageLabel(s),
     extra(f, x, side) {
       const s = side === "prev" ? x.e : x.t;
       if (x.changes.some(c => c.k === "client" || c.k === "leadName")) f.Title = leadTitle(s);
@@ -1809,10 +1813,10 @@ function renderPreview(u) {
         (a.inactive ? '<span class="tag">inactive</span>' : "") + '</span><span class="muted small">' + plural(a.tasks, K.noun) + "</span></label>").join("") + "</div></details>" : "") +
     (T.status.length ? '<details class="sect"><summary>' + K.statusLabel + " (" + fmtN(T.status.length) + ")</summary><div class=\"inner\">" +
       sectionTable(T.status, ["Client", u.kind === "leads" ? "Lead" : "Task", "From", "To"], x => { const c = x.changes.find(c => c.k === K.statusKey);
-        return "<tr><td>" + esc(x.t.client) + "</td>" + subj(x.t) + '<td><span class="badge ' + K.badge(c.from) + '">' + esc(c.from) + '</span></td><td><span class="badge ' + K.badge(c.to) + '">' + esc(c.to) + "</span></td></tr>"; }) + "</div></details>" : "") +
+        return "<tr><td>" + esc(x.t.client) + "</td>" + subj(x.t) + '<td><span class="badge ' + K.badge(c.from) + '">' + esc(K.label(c.from)) + '</span></td><td><span class="badge ' + K.badge(c.to) + '">' + esc(K.label(c.to)) + "</span></td></tr>"; }) + "</div></details>" : "") +
     (T.creates.length ? '<details class="sect"><summary>New ' + K.nouns + " (" + fmtN(T.creates.length) + ")</summary><div class=\"inner\">" +
       sectionTable(T.creates, ["Client", "Adviser", u.kind === "leads" ? "Lead" : "Task", u.kind === "leads" ? "Stage" : "Status"], c => "<tr><td>" + esc(c.t.client) + "</td><td>" + esc(flipName(c.t.adviser)) + "</td>" + subj(c.t) +
-        '<td><span class="badge ' + K.badge(c.t[K.statusKey]) + '">' + esc(c.t[K.statusKey]) + "</span></td></tr>") + "</div></details>" : "") +
+        '<td><span class="badge ' + K.badge(c.t[K.statusKey]) + '">' + esc(K.label(c.t[K.statusKey])) + "</span></td></tr>") + "</div></details>" : "") +
     (T.cmt.length && u.kind === "tasks" ? '<details class="sect"><summary>New comments (' + fmtN(T.newComments) + " on " + plural(T.cmt.length, "task") + ")</summary><div class=\"inner\">" +
       sectionTable(T.cmt, ["Client", "Task", "New", "Latest comment"], x => "<tr><td>" + esc(x.t.client) + "</td>" + subj(x.t) + '<td class="num">' + x.added +
         '</td><td class="cmt-cell"><div class="clamp">' + esc(x.merged[0] ? x.merged[0].text : "") + "</div></td></tr>") + "</div></details>" : "") +
@@ -2065,12 +2069,14 @@ function setStages() {
   const seeded = state.stages.length > 0;
   const rows = list.map((s, i) => '<tr><td class="nowrap"><button class="btn ghost sm" data-mv="' + i + '" data-d="-1"' + (i && seeded ? "" : " disabled") + ' title="Move up">▲</button>' +
     '<button class="btn ghost sm" data-mv="' + i + '" data-d="1"' + (i < list.length - 1 && seeded ? "" : " disabled") + ' title="Move down">▼</button></td>' +
-    '<td><span class="badge ' + stageClass(s.name) + '">' + esc(s.name) + '</span></td><td class="num">' + fmtN(counts.get(s.name) || 0) + "</td>" +
+    '<td><span class="badge ' + stageClass(s.name) + '">' + esc(s.name) + "</span></td>" +
+    '<td><input type="text" data-nick="' + i + '" value="' + esc(s.nickname || "") + '" placeholder="' + esc(s.name) + '" maxlength="60" style="width:100%;min-width:160px"' + (seeded ? "" : " disabled") + "></td>" +
+    '<td class="num">' + fmtN(counts.get(s.name) || 0) + "</td>" +
     '<td><label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" data-hide="' + i + '"' + (s.hidden ? "" : " checked") + (seeded ? "" : " disabled") + "> " + (s.hidden ? "Hidden" : "Shown") + "</label></td></tr>");
-  $("#set-body").innerHTML = setHead("Lead stages", "The order of the stage tabs, and which ones show. Hidden stages stay in the data — \"Show hidden stages\" on the Lead stages page brings them back.",
+  $("#set-body").innerHTML = setHead("Lead stages", "The order of the stage tabs, which ones show, and an optional nickname for each. Nicknames are only for the platform — uploads, matching and the weekly email still use the Xplan name. Hidden stages stay in the data; \"Show hidden stages\" on the Lead stages page brings them back.",
       seeded ? "" : '<button class="btn primary" id="seed-stages">Set up stage list</button>') +
     (seeded ? "" : '<div class="banner info">This is the default order. It\'s saved to SharePoint by the first leads upload, or now with Set up stage list — after that it can be changed.</div>') +
-    tableOf(["Order", "Stage", "Leads now", "Tab"], rows, "") +
+    tableOf(["Order", "Xplan stage", "Nickname (optional)", "Leads now", "Tab"], rows, "") +
     '<div style="margin-top:14px">' + settingsForm("stages") + "</div>";
   bindSettingsSave();
   const seed = $("#seed-stages");
@@ -2080,6 +2086,20 @@ function setStages() {
     const s = list[+cb.dataset.hide];
     try { await db.update("stages", s.id, { Hidden: !cb.checked }); await refresh(true); renderSettings(); }
     catch (e) { toast("Couldn't save: " + e.message, true); }
+  });
+  /* Saves when you leave the box or press Enter. Blank = use the Xplan name. */
+  $$("[data-nick]").forEach(inp => {
+    const save = async () => {
+      const s = list[+inp.dataset.nick], v = inp.value.trim();
+      if (v === (s.nickname || "")) return;
+      try { await db.update("stages", s.id, { Nickname: v }); s.nickname = v; toast(v ? "Nickname saved — " + s.name + " shows as \"" + v + "\"" : "Nickname cleared — showing " + s.name); }
+      catch (e) {
+        toast(/Nickname|not recognized|does not exist|field/i.test(e.message) ? "The WITStages list needs its new Nickname column — Settings → Lists → Create missing, then try again." : "Couldn't save: " + e.message, true);
+        inp.value = s.nickname || "";
+      }
+    };
+    inp.onblur = save;
+    inp.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); inp.blur(); } };
   });
 }
 async function moveStage(i, d) {
